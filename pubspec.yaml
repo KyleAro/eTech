@@ -54,6 +54,9 @@ dependencies:
 
   audioplayers: ^6.5.1
 
+  flutter_slidable: ^4.0.3
+
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
