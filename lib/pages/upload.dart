@@ -1,11 +1,14 @@
 import 'package:etech/style/mainpage_style.dart';
 import 'package:flutter/material.dart';
+import 'MainPage.dart';
+
+
 
 class Upload extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Color(0xFFF7EC59), 
+      backgroundColor: backgroundColor,
       body: Center(
         child: Text(
           'Upload Page',

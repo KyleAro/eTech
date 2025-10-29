@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart'hide BoxDecoration, BoxShadow;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_inset_box_shadow/flutter_inset_box_shadow.dart';
@@ -18,6 +19,10 @@ TextStyle getTitleTextStyle(BuildContext context) {
   );
 }
 
+
+ 
+
+
 // this of for  neu box design
 class NeuBox extends StatelessWidget {
   final Widget? child;
@@ -31,23 +36,23 @@ class NeuBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final backgroundColor = Color(0xFFF7EC59);
+
     final Offset distance = isPressed ? Offset(10, 10) : Offset(28, 28);
-    final double blur = isPressed ? 20.0 : 30.0;
+    final double blur = isPressed ? 10.0 : 30.0;
 
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(99),
-        color: backgroundColor,
+        color: const Color.fromARGB(255, 192, 109, 13),
         boxShadow: [
           BoxShadow(
-            color: backgroundColor,
+            color: const Color.fromARGB(255, 112, 70, 16),
             blurRadius: blur,
             offset: -distance,
             inset: isPressed,
           ),
           BoxShadow(
-            color: const Color.fromARGB(225, 167, 196, 82),
+            color: const Color.fromARGB(137, 126, 70, 6),
             blurRadius: blur,
             offset: distance,
             inset: isPressed,
@@ -60,15 +65,6 @@ class NeuBox extends StatelessWidget {
   }
 }
 
-// text style of the app bar title
-
-
-
-TextStyle titleTextStyle = TextStyle(
-  fontSize: 18,
-  
-  color: Colors.black,
-);
-
+// text style of the app bar tit
 // for app bar theme
 

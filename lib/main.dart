@@ -15,7 +15,7 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'eTech Audio Recorder',
       theme: ThemeData(
-      scaffoldBackgroundColor: Color(0xFFF7EC59),
+      scaffoldBackgroundColor: backgroundColor,
   ),
       home: Mainpage(),
     );
