@@ -3,14 +3,12 @@ import 'package:flutter/material.dart';
 class RecordTitleField extends StatelessWidget {
   final bool showTitleField;
   final TextEditingController titleController;
-  // 💡 NEW: Added FocusNode to enable auto-select logic in parent widget
-  final FocusNode? titleFocusNode; 
+ 
 
   const RecordTitleField({
     Key? key,
     required this.showTitleField,
     required this.titleController,
-    this.titleFocusNode, // FocusNode is now an optional parameter
   }) : super(key: key);
 
   @override
@@ -47,7 +45,7 @@ class RecordTitleField extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: TextField(
                     controller: titleController,
-                    focusNode: titleFocusNode, // 💡 NEW: Attach the FocusNode
+                   
                     textAlign: TextAlign.center,
                     cursorColor: Colors.lightBlueAccent, // Set cursor color
                     style: const TextStyle(color: Colors.white, fontSize: 18),
@@ -72,6 +70,7 @@ class RecordTitleField extends StatelessWidget {
               ],
             )
           : const SizedBox.shrink(),
+          
     );
   }
 }

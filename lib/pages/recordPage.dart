@@ -7,6 +7,10 @@ import 'package:path_provider/path_provider.dart';
 import '../widgets/stateless/timer.dart';
 import '../widgets/stateless/recordtitle.dart';
 import '../widgets/stateless/savediscard.dart';
+import '../widgets/stateless/loading_screen.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 
 
 
@@ -34,6 +38,7 @@ class _RecordPageState extends State<RecordPage> {
   bool isPlaying = false;
   bool isPressed = false;
   bool hasmadeChoice = false;
+  bool isUploading = false;
   String? filePath;
 
 
@@ -85,8 +90,30 @@ Future<void> deleteFile(String filePath) async {
     print('Error deleting file: $e');
   }
 }
-// ───────── FILE PATH HELPER ─────────
-// to get the file path nung pagsesavean
+// _________ Upload to firebase storage____________
+Future<void> uploadToUndetermined(String path) async {
+  try {
+    final storageRef = FirebaseStorage.instance.ref().child('Undetermined Ducklings');
+    final fileName = path.split('/').last;
+    final fileRef = storageRef.child(fileName);
+
+    // Upload the file
+    await fileRef.putFile(File(path));
+    final downloadUrl = await fileRef.getDownloadURL();
+
+    // ✅ Save file info in Firestore
+    await FirebaseFirestore.instance.collection('Undetermined').add({
+      'file_name': fileName,
+      'category': 'Undetermined Ducklings',
+      'url': downloadUrl,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+
+    print('✅ Uploaded successfully and saved to Firestore and Firebase Storage!');
+  } catch (e) {
+    print('❌ Upload failed: $e');
+  }
+}
 // ───────── FILE PATH HELPER ─────────
 // to get the file path nung pagsesavean
 Future<String> getFilePath() async {
@@ -98,15 +125,15 @@ Future<String> getFilePath() async {
 
     // Loop until a non-existent file path is found
     while (true) {
-      uniquePath = '${directory!.path}/Recording_$count.aac';
+      uniquePath = '${directory!.path}/Undetermined_$count.aac';
 
       // Check if the file already exists
       if (!await File(uniquePath).exists()) {
-        break; // Found a unique path!
+        break; 
       }
       count++;
     }
-    // Returns the first path that was found NOT to exist
+    
     return uniquePath;
   }
 
@@ -175,10 +202,13 @@ Future record() async {
 
 Future stop() async {
   if (!isRecorderReady) return;
-        await recorder.stopRecorder();
-setState(() {
-      isRecording = false;  
-    });
+
+  final path = await recorder.stopRecorder();
+  print('🎙️ Recording saved at: $path');
+
+  setState(() {
+    isRecording = false;
+  });
 
 }
 
@@ -243,7 +273,8 @@ Future<void> saveRecording() async {
     }
     
     await tempFile.rename(finalSavePath);
-
+    // ✅ Upload to Firebase "Undetermined Ducklings"
+     await uploadToUndetermined(finalSavePath);
     // 5. Update the state
     setState(() {
       hasmadeChoice = true;
@@ -253,7 +284,7 @@ Future<void> saveRecording() async {
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Recording saved as "$recordTitle.aac"')),
+      SnackBar(content: Text('Recording saved to storage as "$recordTitle.aac" ')),
     );
 
   } catch (e) {

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "206112234935",
+    "project_id": "etechstorage-87e4a",
+    "storage_bucket": "etechstorage-87e4a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:206112234935:android:787124d0678506f971dc32",
+        "android_client_info": {
+          "package_name": "com.example.etech"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBsC387YEXs-IiT3ng1iHDwA9dqzKAaZyk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

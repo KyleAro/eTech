@@ -3,6 +3,7 @@ import 'package:curved_navigation_bar/curved_navigation_bar.dart';
 import 'file_management.dart';
 import 'upload.dart';
 import 'recordPage.dart';
+import 'package:firebase_core/firebase_core.dart';
 
  const buttonColor = Colors.black;
  const backgroundColor = Color.fromARGB(255, 126, 70, 6);
