@@ -1,9 +1,10 @@
+import 'package:etech/pages/merge.dart';
+import 'package:etech/widgets/stateless/loading_screen.dart';
 import 'package:flutter/material.dart' ;
 import 'package:curved_navigation_bar/curved_navigation_bar.dart';
 import 'file_management.dart';
 import 'upload.dart';
 import 'recordPage.dart';
-import 'package:firebase_core/firebase_core.dart';
 
  const buttonColor = Colors.black;
  const backgroundColor = Color.fromARGB(255, 126, 70, 6);
@@ -32,6 +33,7 @@ class _MainpageState extends State<Mainpage> {
     FileManagement(),
     RecordPage(),
     Upload(),
+    LoadingScreen(),
   ];
  @override
   Widget build(BuildContext context) {
@@ -85,7 +87,11 @@ class _MainpageState extends State<Mainpage> {
           size: 30,
           color: buttonColor,
         ),
-        
+        Icon(
+          _currentIndex == 4 ? Icons.temple_buddhist : Icons.temple_buddhist_sharp,
+          size: 30,
+          color: buttonColor,
+        ),
       ],  
     ),     
       ),
