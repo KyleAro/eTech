@@ -1,9 +1,8 @@
 import 'package:etech/pages/merge.dart';
-import 'package:etech/widgets/stateless/loading_screen.dart';
+
 import 'package:flutter/material.dart' ;
 import 'package:curved_navigation_bar/curved_navigation_bar.dart';
 import 'file_management.dart';
-import 'upload.dart';
 import 'recordPage.dart';
 
  const buttonColor = Colors.black;
@@ -13,7 +12,7 @@ import 'recordPage.dart';
 final List<Widget> pages = [
       FileManagement(),  
       Mainpage(),
-      Upload(),
+      GenderPredictorApp()
     ];
 
  
@@ -32,8 +31,8 @@ class _MainpageState extends State<Mainpage> {
   final List<Widget> _pages = [
     FileManagement(),
     RecordPage(),
-    Upload(),
-    LoadingScreen(),
+    GenderPredictorApp(),
+   
   ];
  @override
   Widget build(BuildContext context) {
@@ -84,11 +83,6 @@ class _MainpageState extends State<Mainpage> {
         ),
         Icon(
           _currentIndex == 3 ? Icons.backup : Icons.backup_outlined,
-          size: 30,
-          color: buttonColor,
-        ),
-        Icon(
-          _currentIndex == 4 ? Icons.temple_buddhist : Icons.temple_buddhist_sharp,
           size: 30,
           color: buttonColor,
         ),

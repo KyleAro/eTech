@@ -1,9 +1,15 @@
-# this is the python file that turns our ml to an api.
+# try.py (updated)
+# --- install these first ---
+# pip install flask librosa numpy joblib pydub soundfile
 
 from flask import Flask, request, jsonify
-import librosa, numpy as np, joblib, os, uuid, traceback
+import librosa, numpy as np, joblib, os, uuid, traceback, io
 from werkzeug.utils import secure_filename
-from pydub import AudioSegment  # <-- added for universal audio handling
+from pydub import AudioSegment, silence
+import concurrent.futures
+import warnings
+
+warnings.filterwarnings("ignore")
 
 app = Flask(__name__)
 
@@ -16,11 +22,10 @@ scaler = joblib.load(SCALER_PATH)
 
 print("Model and scaler loaded successfully!")
 
-# --- Feature extraction function ---
-def extract_features(file_path):
-    y, sr = librosa.load(file_path, sr=None)
-    if y.size == 0:
-        raise ValueError("Audio file is empty")
+# --- Feature extraction function (works from numpy y,sr or file path) ---
+def extract_features_from_y(y, sr):
+    if y is None or y.size == 0:
+        raise ValueError("Audio data is empty")
 
     y = librosa.util.normalize(y)
 
@@ -32,8 +37,72 @@ def extract_features(file_path):
     pitch = np.mean(pitches[pitches > 0]) if np.any(pitches > 0) else 0
 
     features = np.hstack([mfccs, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
-    features = np.nan_to_num(features)  # Replace NaNs with 0
+    features = np.nan_to_num(features)
     return features.reshape(1, -1)
+
+def extract_features(file_source):
+    
+    if hasattr(file_source, "read"):
+        # file-like
+        file_source.seek(0)
+        y, sr = librosa.load(file_source, sr=None)
+    else:
+        y, sr = librosa.load(file_source, sr=None)
+    return extract_features_from_y(y, sr)
+
+# --- Helper: clean and split audio in-memory ---
+def clean_and_split_audio_segment(audio_segment, clip_length_ms=3000, min_silence_len=400, silence_thresh=-40):
+    # Split on silence into chunks
+    chunks = silence.split_on_silence(
+        audio_segment,
+        min_silence_len=min_silence_len,
+        silence_thresh=silence_thresh
+    )
+
+    if not chunks:
+        chunks = [audio_segment]
+
+    # Recombine with short silent padding
+    combined = AudioSegment.empty()
+    for c in chunks:
+        combined += c + AudioSegment.silent(duration=100)
+
+    # Export cleaned full audio
+    cleaned_path = os.path.join('temp', f"{uuid.uuid4().hex}_cleaned.wav")
+    combined.export(cleaned_path, format="wav")
+
+    # Slice into fixed-length clips
+    clips = []
+    for start in range(0, len(combined), clip_length_ms):
+        clip = combined[start:start + clip_length_ms]
+        if len(clip) > 1000:
+            clips.append(clip)
+
+    # RETURN BOTH
+    return clips, cleaned_path
+# --- Worker: process a single AudioSegment clip and return probability vector ---
+def process_clip_predict_probs(clip):
+    
+    try:
+        wav_io = io.BytesIO()
+        clip.export(wav_io, format="wav")
+        wav_io.seek(0)
+
+        # Load with librosa from BytesIO
+        y, sr = librosa.load(wav_io, sr=None)
+        features = extract_features_from_y(y, sr)
+
+        if features.shape[1] != scaler.mean_.shape[0]:
+            # Feature length mismatch, return None to skip
+            return None
+
+        features_scaled = scaler.transform(features)
+        probs = model.predict_proba(features_scaled)[0]
+        return probs
+    except Exception as e:
+        # Log and return None so it can be skipped
+        print("Clip processing error:", e)
+        return None
 
 # --- Prediction endpoint ---
 @app.route('/predict', methods=['POST'])
@@ -50,9 +119,10 @@ def predict():
     orig_path = os.path.join('temp', orig_filename)
     file.save(orig_path)
 
-    # Convert to WAV if not already
     converted_path = os.path.join('temp', f"{uuid.uuid4().hex}.wav")
     try:
+        # convert to mono 16k wav (you said you already handle conversion elsewhere,
+        # but keeping this step ensures consistent SR/channels for cleaning)
         audio = AudioSegment.from_file(orig_path)
         audio = audio.set_channels(1).set_frame_rate(16000)
         audio.export(converted_path, format="wav")
@@ -61,24 +131,45 @@ def predict():
         return jsonify({'error': f'Audio conversion failed: {e}'}), 500
 
     try:
-        features = extract_features(converted_path)
-        print("Extracted features shape:", features.shape)
+        # load converted file as AudioSegment and clean/split into clips
+        audio_segment = AudioSegment.from_file(converted_path)
+        clips = clean_and_split_audio_segment(audio_segment, clip_length_ms=3000,
+                                              min_silence_len=400, silence_thresh=-40)
 
-        if features.shape[1] != scaler.mean_.shape[0]:
-            raise ValueError(f"Feature length {features.shape[1]} does not match scaler expected {scaler.mean_.shape[0]}")
+        if not clips:
+            raise ValueError("No valid clips after cleaning/splitting")
 
-        features_scaled = scaler.transform(features)
-        probs = model.predict_proba(features_scaled)[0]
-        print("Model classes:", model.classes_)
-        print("Scaler mean shape:", scaler.mean_.shape)
+        # Process clips in parallel
+        max_workers = min(8, (os.cpu_count() or 2))
+        all_probs = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(process_clip_predict_probs, clip) for clip in clips]
+            for fut in concurrent.futures.as_completed(futures):
+                probs = fut.result()
+                if probs is not None:
+                    all_probs.append(probs)
 
-        pred_class = model.classes_[np.argmax(probs)]
-        confidence = float(np.max(probs))
+        if not all_probs:
+            raise ValueError("No valid predictions from any clip")
+
+        # average probabilities across clips
+        avg_probs = np.mean(all_probs, axis=0)
+
+        # Decide prediction & confidence
+        max_idx = int(np.argmax(avg_probs))
+        pred_class = model.classes_[max_idx]
         gender = "Male" if "male" in pred_class.lower() else "Female"
+        confidence_val = float(avg_probs[max_idx])  # in 0..1
+
+        # Optional: also provide per-class percent values
+        confidence_male = float(avg_probs[model.classes_.tolist().index('male')]) * 100 if 'male' in model.classes_ else 0.0
+        confidence_female = float(avg_probs[model.classes_.tolist().index('female')]) * 100 if 'female' in model.classes_ else 0.0
 
         return jsonify({
             'prediction': gender.capitalize(),
-            'confidence': round(float(confidence or 0) * 100, 2)
+            'confidence': round(confidence_val * 100, 2),
+            'confidence_male': round(confidence_male, 2),
+            'confidence_female': round(confidence_female, 2)
         })
 
     except Exception as e:
