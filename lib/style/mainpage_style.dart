@@ -43,16 +43,16 @@ class NeuBox extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(99),
-        color: const Color.fromARGB(255, 192, 109, 13),
+        color: const Color.fromARGB(255, 223, 148, 10),
         boxShadow: [
           BoxShadow(
-            color: const Color.fromARGB(255, 112, 70, 16),
+            color: const Color.fromARGB(255, 117, 96, 32),
             blurRadius: blur,
             offset: -distance,
             inset: isPressed,
           ),
           BoxShadow(
-            color: const Color.fromARGB(137, 126, 70, 6),
+            color: const Color.fromARGB(134, 235, 163, 81),
             blurRadius: blur,
             offset: distance,
             inset: isPressed,

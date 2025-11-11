@@ -6,8 +6,7 @@ import 'file_management.dart';
 import 'recordPage.dart';
 import 'merge.dart';
 
-const buttonColor = Colors.black;
-const backgroundColor = Color.fromARGB(255, 126, 70, 6);
+const backgroundColor = Color(0xFFF7EC59);
 
 class Mainpage extends StatefulWidget {
   const Mainpage({super.key});
@@ -31,11 +30,10 @@ class _MainpageState extends State<Mainpage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true, // allow AppBar to go behind status bar
+      extendBodyBehindAppBar: true,
       backgroundColor: backgroundColor,
       appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Color(0xFFF7EC59),
+        backgroundColor: backgroundColor,
         title: const Text(
           'eTech',
           style: TextStyle(
@@ -44,9 +42,7 @@ class _MainpageState extends State<Mainpage> {
           ),
         ),
         centerTitle: true,
-        // make AppBar cover status bar
-        toolbarHeight: kToolbarHeight + MediaQuery.of(context).padding.top,
-      ),
+         ),
       body: AnimatedSwitcher(
         duration: Duration(milliseconds: 300),
         transitionBuilder: (child, animation) {
@@ -70,11 +66,11 @@ class _MainpageState extends State<Mainpage> {
         ),
       ),
       bottomNavigationBar: Container(
-        color: Color(0xFFF7EC59),
+        color: backgroundColor,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10),
           child: GNav(
-            backgroundColor: Color(0xFFF7EC59),
+            backgroundColor: backgroundColor,
             color: Colors.black,
             activeColor: Colors.white,
             tabBackgroundColor: Colors.grey.shade800,

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:etech/pages/MainPage.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
@@ -62,7 +63,7 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
 
     try {
       var request =
-          http.MultipartRequest('POST', Uri.parse("http://192.168.1.8:5000/predict"));
+          http.MultipartRequest('POST', Uri.parse("http://192.168.1.9:5000/predict"));
       request.files.add(await http.MultipartFile.fromPath('file', file.path));
       var response = await request.send();
       var respStr = await response.stream.bytesToString();
@@ -108,45 +109,94 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
-          title: const Text("Gender Pitch Detector"),
-          backgroundColor: Colors.black87,
-        ),
-        body: Center(
+@override
+Widget build(BuildContext context) {
+  return MaterialApp(
+    home: Scaffold(
+      backgroundColor: backgroundColor,
+      appBar: AppBar(
+        title: const Text("Gender Pitch Detector"),
+        backgroundColor: const Color.fromARGB(221, 235, 224, 224),
+        elevation: 2,
+      ),
+      body: Center(
+        child: SingleChildScrollView(
           child: Padding(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                ElevatedButton(
-                  onPressed: loading ? null : _pickAndSendFile,
-                  style: ElevatedButton.styleFrom(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                    backgroundColor: Colors.blueAccent,
-                  ),
-                  child: const Text(
-                    "Select Audio File",
-                    style:
-                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                // Upload Container
+                GestureDetector(
+                  onTap: loading ? null : _pickAndSendFile,
+                  child: Container(
+                    width: double.infinity,
+                    height: 160,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[850],
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.blueAccent, width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.blueAccent.withOpacity(0.2),
+                          blurRadius: 12,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: const Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.upload_file, size: 55, color: Colors.blueAccent),
+                          SizedBox(height: 12),
+                          Text(
+                            "Tap to select audio file",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.white70, fontSize: 16),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  result,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
+
+                const SizedBox(height: 25),
+
+                // Loader / Progress Indicator
+                if (loading)
+                  const LinearProgressIndicator(
+                    backgroundColor: Colors.grey,
+                    color: Colors.blueAccent,
+                    minHeight: 6,
+                  ),
+
+                const SizedBox(height: 25),
+
+                // Result Box
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[850],
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.blueAccent.withOpacity(0.4)),
+                  ),
+                  child: Text(
+                    result.isEmpty ? "No result yet" : result,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                  ),
                 ),
+
+                const SizedBox(height: 25),
               ],
             ),
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
+
 }

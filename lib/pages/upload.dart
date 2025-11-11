@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
-import '../widgets/stateless/timer.dart'; // Your RecordTimer widget
+
 
 class Upload extends StatefulWidget {
   @override
@@ -96,10 +96,7 @@ class _UploadState extends State<Upload> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     // ✅ Timer widget
-                    RecordTimer(
-                      isRecording: isRecording,
-                      progressStream: recorder.onProgress,
-                    ),
+                   
                     SizedBox(height: 30),
 
                     // Stop button
@@ -137,7 +134,7 @@ class _UploadState extends State<Upload> {
                           ),
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
+                              backgroundColor: const Color.fromARGB(255, 221, 130, 124),
                               padding: EdgeInsets.symmetric(
                                   horizontal: 20, vertical: 15),
                             ),

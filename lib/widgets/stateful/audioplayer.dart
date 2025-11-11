@@ -164,7 +164,7 @@ class AudioPlayerControls extends StatelessWidget {
               children: [
                 IconButton(
                   icon: const Icon(Icons.replay_10, color: Colors.white),
-                  iconSize: 32,
+                  iconSize: 60,
                   onPressed: () => audioPlayer.rewind(const Duration(seconds: 10)),
                 ),
                 const SizedBox(width: 10),
@@ -175,13 +175,13 @@ class AudioPlayerControls extends StatelessWidget {
                         : Icons.play_circle_fill,
                     color: Colors.white,
                   ),
-                  iconSize: 40,
+                  iconSize: 60,
                   onPressed: () => audioPlayer.play(filePath),
                 ),
                 const SizedBox(width: 10),
                 IconButton(
                   icon: const Icon(Icons.forward_10, color: Colors.white),
-                  iconSize: 32,
+                  iconSize: 60,
                   onPressed: () => audioPlayer.forward(const Duration(seconds: 10)),
                 ),
               ],

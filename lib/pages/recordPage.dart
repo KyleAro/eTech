@@ -81,112 +81,104 @@ class _RecordPageState extends State<RecordPage> {
 
   void _showRecordingBottomSheet() {
   bool showExtraButtons = false;
-  String? cleanedFilePath; // store the cleaned audio
-  final bottomSheetAudioPlayer = AudioPlayerService(); // single instance for playback
+  String? cleanedFilePath;
+  final bottomSheetAudioPlayer = AudioPlayerService();
 
   showModalBottomSheet(
     context: context,
+    isDismissible: false,       // ✖ cannot tap outside
+    enableDrag: false,          // ✖ cannot swipe down
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    enableDrag: false,
     builder: (context) {
-      return StatefulBuilder(
-        builder: (context, setModalState) {
-          return FractionallySizedBox(
-            heightFactor: 0.6,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.grey[900],
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Recording Title Field
-                  RecordTitleField(
-                    showTitleField: showExtraButtons,
-                    titleController: titleController,
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Timer
-                  StreamBuilder<RecordingDisposition>(
-                    stream: recorder.onProgress,
-                    builder: (context, snapshot) {
-                      final duration = snapshot.hasData ? snapshot.data!.duration : Duration.zero;
-                      final text =
-                          '${duration.inMinutes.toString().padLeft(2, '0')}:${(duration.inSeconds % 60).toString().padLeft(2, '0')}';
-                      return Text(
-                        text,
-                        style: const TextStyle(
-                          fontSize: 36,
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Stop button
-                  if (!showExtraButtons)
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        shape: const CircleBorder(),
-                        padding: const EdgeInsets.all(20),
-                        backgroundColor: Colors.orangeAccent,
-                      ),
-                     onPressed: () async {
-                      
-                        await stopRecording();
-
-                        String processedFile = filePath!;
-                        try {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("Processing audio...")),
-                          );
-
-                          // Convert + remove silence + enhance
-                          processedFile = await AudioProcessor.process(filePath!);
-                        } catch (e) {
-                          print("Audio processing failed: $e");
-                          processedFile = filePath!; // fallback
-                        }
-
-                        // Set processed audio for playback
-                        filePath = processedFile;
-                        cleanedFilePath = processedFile;
-
-                        // Show playback slider and save/discard buttons
-                        setModalState(() => showExtraButtons = true);
+      return WillPopScope(
+        onWillPop: () async => false, // ✖ disables back button
+        child: StatefulBuilder(
+          builder: (context, setModalState) {
+            return FractionallySizedBox(
+              heightFactor: 0.6,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.grey[900],
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    RecordTitleField(
+                      showTitleField: showExtraButtons,
+                      titleController: titleController,
+                    ),
+                    const SizedBox(height: 20),
+                    // Timer
+                    StreamBuilder<RecordingDisposition>(
+                      stream: recorder.onProgress,
+                      builder: (context, snapshot) {
+                        final duration = snapshot.hasData ? snapshot.data!.duration : Duration.zero;
+                        final text =
+                            '${duration.inMinutes.toString().padLeft(2, '0')}:${(duration.inSeconds % 60).toString().padLeft(2, '0')}';
+                        return Text(
+                          text,
+                          style: const TextStyle(
+                            fontSize: 50,
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        );
                       },
-                      child: const Icon(
-                        Icons.stop,
-                        size: 30,
-                        color: Colors.white,
+                    ),
+                    const SizedBox(height: 20),
+                    // Stop button
+                    if (!showExtraButtons)
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          shape: const CircleBorder(),
+                          padding: const EdgeInsets.all(20),
+                          backgroundColor: Colors.orangeAccent,
+                        ),
+                        onPressed: () async {
+                          await stopRecording();
+                          String processedFile = filePath!;
+                          try {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("Processing audio...")),
+                            );
+
+                            processedFile = await AudioProcessor.process(filePath!);
+                          } catch (e) {
+                            print("Audio processing failed: $e");
+                            processedFile = filePath!;
+                          }
+
+                          filePath = processedFile;
+                          cleanedFilePath = processedFile;
+
+                          setModalState(() => showExtraButtons = true);
+                        },
+                        child: const Icon(
+                          Icons.stop,
+                          size: 30,
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                  const SizedBox(height: 20),
-
-                  // Play / Slider for recording (use cleaned file if available)
-                  if (showExtraButtons && cleanedFilePath != null)
-                    AudioPlayerControls(
-                      audioPlayer: bottomSheetAudioPlayer,
-                      filePath: cleanedFilePath!,
-                    ),
-                  const SizedBox(height: 20),
-
-                  // Save / Discard buttons
-                  if (showExtraButtons)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        ElevatedButton(
+                    const SizedBox(height: 20),
+                    if (showExtraButtons && cleanedFilePath != null)
+                      AudioPlayerControls(
+                        audioPlayer: bottomSheetAudioPlayer,
+                        filePath: cleanedFilePath!,
+                      ),
+                    const SizedBox(height: 20),
+                    // Save / Discard buttons
+                    if (showExtraButtons)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          ElevatedButton(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green,
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
                             ),
                             onPressed: () async {
                               if (cleanedFilePath != null && await File(cleanedFilePath!).exists()) {
@@ -221,7 +213,7 @@ class _RecordPageState extends State<RecordPage> {
                                   titleController.clear();
                                 });
 
-                                Navigator.pop(context);
+                                Navigator.pop(context); // close sheet
                               }
                             },
                             child: const Text(
@@ -229,30 +221,26 @@ class _RecordPageState extends State<RecordPage> {
                               style: TextStyle(color: Colors.white),
                             ),
                           ),
-                          //discard button
-                        ElevatedButton(
+                          ElevatedButton(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                              backgroundColor: const Color.fromARGB(255, 223, 111, 103),
+                              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
                             ),
                             onPressed: () async {
                               try {
                                 final directory = await getExternalStorageDirectory();
                                 final baseName = titleController.text.trim();
 
-                                // 🧹 Delete temp recorded AAC file
                                 if (filePath != null && await File(filePath!).exists()) {
                                   await File(filePath!).delete();
                                   print("🗑️ Deleted temp AAC file: ${filePath!}");
                                 }
 
-                                // 🧹 Delete processed WAV file (if exists)
                                 if (cleanedFilePath != null && await File(cleanedFilePath!).exists()) {
                                   await File(cleanedFilePath!).delete();
                                   print("🗑️ Deleted cleaned WAV file: ${cleanedFilePath!}");
                                 }
 
-                                // 🧹 Extra safety — delete any stray AAC/WAV with same name in folder
                                 final files = directory!.listSync();
                                 for (var file in files) {
                                   if (file is File &&
@@ -263,7 +251,6 @@ class _RecordPageState extends State<RecordPage> {
                                   }
                                 }
 
-                                // Reset states
                                 setState(() {
                                   isRecording = false;
                                   titleController.clear();
@@ -278,7 +265,7 @@ class _RecordPageState extends State<RecordPage> {
                                   ),
                                 );
 
-                                Navigator.pop(context);
+                                Navigator.pop(context); // close sheet
                               } catch (e) {
                                 print("⚠️ Error discarding files: $e");
                                 ScaffoldMessenger.of(context).showSnackBar(
@@ -291,23 +278,28 @@ class _RecordPageState extends State<RecordPage> {
                               style: TextStyle(color: Colors.white),
                             ),
                           ),
-                      ],
-                    ),
-                ],
+                        ],
+                      ),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       );
     },
   );
 }
 
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
+@override
+Widget build(BuildContext context) {
+  return Scaffold(
+    body: Center(
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Center(
         child: GestureDetector(
           onTap: () async {
             if (!isRecording) {
@@ -329,6 +321,9 @@ class _RecordPageState extends State<RecordPage> {
           ),
         ),
       ),
-    );
-  }
+      ],
+    ),
+    ),
+  );
+}
 }

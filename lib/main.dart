@@ -9,7 +9,10 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 void main() async {
   
    WidgetsFlutterBinding.ensureInitialized(); 
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  SystemChrome.setEnabledSystemUIMode(
+  SystemUiMode.manual,
+  overlays: [SystemUiOverlay.top], 
+);
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );

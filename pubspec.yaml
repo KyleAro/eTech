@@ -64,6 +64,7 @@ dependencies:
   
   audioplayers: ^6.5.1
   ffmpeg_kit_flutter_new_min_gpl: ^2.1.1
+  lottie: ^3.3.2
 
   
 
