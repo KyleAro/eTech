@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 class RecordTitleField extends StatelessWidget {
   final bool showTitleField;
   final TextEditingController titleController;
- 
 
   const RecordTitleField({
     Key? key,
@@ -13,18 +12,16 @@ class RecordTitleField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    
-    // --- Define common border style ---
     const OutlineInputBorder borderStyle = OutlineInputBorder(
-      borderRadius: BorderRadius.all(Radius.circular(12.0)), // Softer rounded corners
+      borderRadius: BorderRadius.all(Radius.circular(12.0)),
       borderSide: BorderSide(color: Colors.white70, width: 1.5),
     );
 
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 300), // Increased duration for a smoother slide
+      duration: const Duration(milliseconds: 300),
       transitionBuilder: (child, animation) => SlideTransition(
         position: Tween<Offset>(
-          begin: const Offset(0, 0.5), 
+          begin: const Offset(0, 0.5),
           end: Offset.zero,
         ).animate(CurvedAnimation(
           parent: animation,
@@ -35,32 +32,28 @@ class RecordTitleField extends StatelessWidget {
           child: child,
         ),
       ),
-      
-
       child: showTitleField
           ? Column(
               key: const ValueKey('titleField'),
               children: [
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
                   child: TextField(
                     controller: titleController,
-                   
                     textAlign: TextAlign.center,
-                    cursorColor: Colors.lightBlueAccent, // Set cursor color
+                    readOnly: true, // make it non-editable
+                    cursorColor: const Color.fromARGB(255, 228, 213, 8),
                     style: const TextStyle(color: Colors.white, fontSize: 18),
                     decoration: InputDecoration(
-                      contentPadding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 20.0), // Consistent padding
-                      labelText: 'Recording Title',
+                      contentPadding: const EdgeInsets.symmetric(
+                          vertical: 16.0, horizontal: 20.0),
+                      labelText: 'Record Title',
                       labelStyle: const TextStyle(color: Colors.white70),
-                      
-                      // 💡 NEW STYLE: Rounded borders
                       enabledBorder: borderStyle,
                       focusedBorder: borderStyle.copyWith(
-                        borderSide: const BorderSide(color: Colors.lightBlueAccent, width: 2.0),
+                        borderSide: const BorderSide(
+                            color: Color.fromARGB(255, 228, 213, 8), width: 2.0),
                       ),
-                      
-                      // Hint style can be useful if label is removed
                       hintText: 'Enter a title',
                       hintStyle: const TextStyle(color: Colors.grey),
                     ),
@@ -70,7 +63,6 @@ class RecordTitleField extends StatelessWidget {
               ],
             )
           : const SizedBox.shrink(),
-          
     );
   }
 }

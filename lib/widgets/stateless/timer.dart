@@ -19,7 +19,7 @@ class RecordTimer extends StatelessWidget {
       transitionBuilder: (child, animation) => SlideTransition(
         position: Tween<Offset>(
           begin: const Offset(0, 0.5), // starts slightly lower
-          end: Offset.zero,             // slides up into view
+          end: Offset.zero,           
         ).animate(CurvedAnimation(
           parent: animation,
           curve: Curves.easeOut,

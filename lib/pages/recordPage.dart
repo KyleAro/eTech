@@ -1,19 +1,15 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../style/mainpage_style.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
-import '../widgets/stateless/timer.dart';
 import '../widgets/stateless/recordtitle.dart';
-import '../widgets/stateless/savediscard.dart';
-import '../widgets/stateless/loading_screen.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-
-
-
-
+import '../database/firebase_con.dart';
+import '../database/firestore_con.dart';
+import '../widgets/stateful/audioplayer.dart';
+import '../widgets/stateful/audio_cleaner.dart';
 
 class RecordPage extends StatefulWidget {
   @override
@@ -21,434 +17,318 @@ class RecordPage extends StatefulWidget {
 }
 
 class _RecordPageState extends State<RecordPage> {
-
-  // CONTROLLERS
-
   final recorder = FlutterSoundRecorder();
   TextEditingController titleController = TextEditingController();
+  final FirebaseConnect _storageService = FirebaseConnect();
+  final FirestoreConnect _firestoreService = FirestoreConnect();
 
-
- 
-
-
-  // BOOLEANS
-  bool showTitleField = false;
   bool isRecorderReady = false;
   bool isRecording = false;
-  bool isPlaying = false;
-  bool isPressed = false;
-  bool hasmadeChoice = false;
-  bool isUploading = false;
   String? filePath;
 
-
-
-
-
-
-
-// ───────── STATE TOGGLES ─────────
-void toggleisPressed() {
-    setState(() {
-      isPressed = !isPressed;
-    });
+  @override
+  void initState() {
+    super.initState();
+    initRecorder();
   }
 
+  @override
+  void dispose() {
+    recorder.closeRecorder();
+    super.dispose();
+  }
 
-// ───────── LIFECYCLE ─────────
-@override
-void initState() {
-  super.initState();
-  initRecorder();
-
-
-}
-
-
-@override
-void dispose() {
-  recorder.closeRecorder
-  
-  ();
-  super.dispose();
-}
-
-// delete file
-
-
-Future<void> deleteFile(String filePath) async {
-  try {
-    final file = File(filePath);
-
-    if (await file.exists()) {
-      await file.delete();
-      print('File deleted successfully!');
-    } else {
-      print('File does not exist.');
+  Future<void> initRecorder() async {
+    final status = await Permission.microphone.request();
+    if (status != PermissionStatus.granted) {
+      throw 'Microphone permission not granted';
     }
-  } catch (e) {
-    print('Error deleting file: $e');
+    await recorder.openRecorder();
+    isRecorderReady = true;
+    recorder.setSubscriptionDuration(const Duration(milliseconds: 500));
   }
-}
-// _________ Upload to firebase storage____________
-Future<void> uploadToUndetermined(String path) async {
-  try {
-    final storageRef = FirebaseStorage.instance.ref().child('Undetermined Ducklings');
-    final fileName = path.split('/').last;
-    final fileRef = storageRef.child(fileName);
 
-    // Upload the file
-    await fileRef.putFile(File(path));
-    final downloadUrl = await fileRef.getDownloadURL();
-
-    // ✅ Save file info in Firestore
-    await FirebaseFirestore.instance.collection('Undetermined').add({
-      'file_name': fileName,
-      'category': 'Undetermined Ducklings',
-      'url': downloadUrl,
-      'timestamp': FieldValue.serverTimestamp(),
-    });
-
-    print('✅ Uploaded successfully and saved to Firestore and Firebase Storage!');
-  } catch (e) {
-    print('❌ Upload failed: $e');
-  }
-}
-// ───────── FILE PATH HELPER ─────────
-// to get the file path nung pagsesavean
-Future<String> getFilePath() async {
+  Future<String> getFilePath() async {
     final directory = await getExternalStorageDirectory();
-
-    // Use a local counter to check for the next available number
     int count = 1;
     String uniquePath = '';
-
-    // Loop until a non-existent file path is found
     while (true) {
       uniquePath = '${directory!.path}/Undetermined_$count.aac';
-
-      // Check if the file already exists
-      if (!await File(uniquePath).exists()) {
-        break; 
-      }
+      if (!await File(uniquePath).exists()) break;
       count++;
     }
-    
     return uniquePath;
   }
 
-// ───────── INITIALIZE RECORDER ─────────
-// this is para sa permission to access the audio recorder
-
-Future initRecorder() async {
-  final status = await Permission.microphone.request();
-  if (status != PermissionStatus.granted) {
-    // the print is for debugging purposes
-   // print("Status: $status");
-    throw 'Microphone permission not granted';
-    
-  }
-  await recorder.openRecorder();
-  isRecorderReady = true;
-  
-
-  recorder.setSubscriptionDuration(const Duration(milliseconds: 500));
-
-// debug purposes para makita kung naandar yung stream
-  //print("Setting up onProgress listener...");
-//recorder.onProgress?.listen((event) {
-  //print("Progress: ${event.duration}");
-
-//});
-}
-
-// ───────── RECORD FUNCTION ─────────
-// eto para sa record function
-
-Future record() async {
-    if (!isRecorderReady) return;
-    if (filePath != null) {
-      print("Error: A recording is already stopped and awaiting save/discard.");
-      // Optionally show a SnackBar to the user here
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please save or discard the current recording first.')),
-      );
-      return; 
-  }
+  Future<void> startRecording() async {
+    if (!isRecorderReady || filePath != null) return;
 
     filePath = await getFilePath();
-
-    
     final fileName = filePath!.split('/').last;
-    titleController.text = fileName.split('.').first; 
-
-      await recorder.startRecorder(toFile: filePath);
-      setState(() {
-        showTitleField = true; 
-        hasmadeChoice = false;
-        isRecording = true;
-      });
+    titleController.text = fileName.split('.').first;
 
     await recorder.startRecorder(toFile: filePath);
-    setState(() {
-      showTitleField = true;
-      hasmadeChoice = false;
-      isRecording = true;
-    });
+    setState(() => isRecording = true);
+
+    _showRecordingBottomSheet();
   }
 
-// ───────── STOP FUNCTION ─────────
-// eto para sa stop function
-
-Future stop() async {
-  if (!isRecorderReady) return;
-
-  final path = await recorder.stopRecorder();
-  print('🎙️ Recording saved at: $path');
-
-  setState(() {
-    isRecording = false;
-  });
-
-}
-
-// ───────── SAVE FUNCTION ─────────
-// this to save recording
-
-Future<void> saveRecording() async {
-  if (filePath == null || hasmadeChoice) return;
-
- // title place holder muna
- 
- 
-  String rawTitle = titleController.text.trim();
-  String defaultName = filePath!.split('/').last.split('.').first;
-  String finalTitle = rawTitle.isNotEmpty ? rawTitle : defaultName;
-
-
-  String recordTitle = finalTitle.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
-
-  if (recordTitle.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Please enter a valid file name.')),
-    );
-    return;
+  Future<void> stopRecording() async {
+    if (!isRecorderReady || !isRecording) return;
+    await recorder.stopRecorder();
+    setState(() => isRecording = false);
   }
 
-  // Eto yung mapupuntahan nung file na sasasve 
-  final directory = await getExternalStorageDirectory();
-  String finalSavePath = '${directory!.path}/$recordTitle.aac';
-  File tempFile = File(filePath!);
-  File saveFile = File(finalSavePath);
+  void _showRecordingBottomSheet() {
+  bool showExtraButtons = false;
+  String? cleanedFilePath; // store the cleaned audio
+  final bottomSheetAudioPlayer = AudioPlayerService(); // single instance for playback
 
-
-  // pang overwrite lang pag existing na yung fileee
-  if (finalSavePath != filePath && await saveFile.exists()) {
-    final overwrite = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Overwrite File?'),
-        content: Text('A file named "$recordTitle.aac" already exists. Overwrite?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Overwrite', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-
-    if (overwrite != true) {
-      return;
-    }
-  }
-  try {
-    
-    if (await saveFile.exists() && finalSavePath != filePath) {
-      await saveFile.delete();
-    }
-    
-    await tempFile.rename(finalSavePath);
-    // ✅ Upload to Firebase "Undetermined Ducklings"
-     await uploadToUndetermined(finalSavePath);
-    // 5. Update the state
-    setState(() {
-      hasmadeChoice = true;
-      filePath = null;
-      showTitleField = false;
-      titleController.clear();
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Recording saved to storage as "$recordTitle.aac" ')),
-    );
-
-  } catch (e) {
-    print('Critical save error: $e');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('🚨 Failed to save file! Error: $e')),
-    );
-  }
-}
-
-  
-// ───────── DISCARD FUNCTION ─────────
-// para sa discard naman boi
-
-Future<void> discardRecording() async {
-  if (filePath == null || hasmadeChoice) return;
-
-  final file = File(filePath!);
-  if (await file.exists()) {
-    await file.delete();
-  }
-
-  setState(() {
-    filePath = null;
-    hasmadeChoice = true;
-    showTitleField = false;
-    titleController.clear();
-  });
-
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content: Text('Recording discarded')),
-  );
-
-}
-  // TODO: Move or upload the recorded file to your desired location
-
- // ======================================================
-  // 🔹 TODO: ADD YOUR EXTRA FUNCTIONS HERE
-  // ======================================================
-  // Example:
-  // Future<void> pauseRecording() async { ... }
-  // Future<void> resumeRecording() async { ... }
-  // Future<void> playRecording() async { ... }
-
-
-
-
-// ───────── BUILD UI ─────────
-@override
-  Widget build(BuildContext context) {
-    
-    return Scaffold(
-
-      // ───── BODY ─────
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          
-          children: [
-            
-            // =========================================
-            // 🏷️ FILE TITLE DISPLAY & EDIT FIELD
-            // =========================================
-              RecordTitleField(
-                    showTitleField: showTitleField,
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    enableDrag: false,
+    builder: (context) {
+      return StatefulBuilder(
+        builder: (context, setModalState) {
+          return FractionallySizedBox(
+            heightFactor: 0.6,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.grey[900],
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Recording Title Field
+                  RecordTitleField(
+                    showTitleField: showExtraButtons,
                     titleController: titleController,
                   ),
+                  const SizedBox(height: 20),
 
-
-            // =========================================
-            // 🏷️ TIMER DISPLAY
-            // =========================================
-               RecordTimer(
-                      isRecording: isRecording,
-                      progressStream: recorder.onProgress,
-                    ),
-
-                            
-                  // =========================================
-                  // 🏷️ RECORD / STOP
-                  // =========================================
-
-                    // this is the neu box button for record and stop 
-                    //this is command when you push the button
-
-                     GestureDetector(
-                      // explanation
-                      // isRecording = false, when i put if not isRecording
-                          onTap: () async {
-                            if (!isRecording) {
-                              await record();
-                              print("Started Recording");
-                              print("Am i Recording: ${!isRecording}");
-                              print('Recording to: $filePath');
-                              
-                            } else {
-                              await stop();
-                              print("Stopped Recording");
-                              print("Am i Recording: ${!isRecording}");
-                              print('Recording to: $filePath');}
-              // ── STATE UPDATE AFTER TAP ──
-
-              // so double negative the init state of ispressed == ! is pressed so false to true 
-              //then after it is clicked again it will be true to false 
-                              setState(() {
-                                isPressed = !isPressed;
-
-                                // Debug prints
-                                print('isPressed: $isPressed');
-                                print('isRecording: $isRecording');
-                              });
-                            },
-
-           // ───────── NEUMORPHIC RECORD BUTTON CONTAINER ─────────
-          // 🎤 Record Button with smooth move-down animation
-                child: AnimatedPadding(
-                    duration: const Duration(milliseconds: 400),
-                    curve: Curves.easeInOut,
-                    padding: EdgeInsets.only(top: isRecording ? 80 : 0), // moves down when recording
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      height: 200,
-                      width: 200,
-                      child: NeuBox(
-                        isPressed: isPressed,
-                        child: Icon(
-                          isPressed ? Icons.stop : Icons.mic,
-                          size: 100,
-                          color: const Color.fromARGB(255, 0, 0, 0),
-
+                  // Timer
+                  StreamBuilder<RecordingDisposition>(
+                    stream: recorder.onProgress,
+                    builder: (context, snapshot) {
+                      final duration = snapshot.hasData ? snapshot.data!.duration : Duration.zero;
+                      final text =
+                          '${duration.inMinutes.toString().padLeft(2, '0')}:${(duration.inSeconds % 60).toString().padLeft(2, '0')}';
+                      return Text(
+                        text,
+                        style: const TextStyle(
+                          fontSize: 36,
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
                         ),
-                        
-                      ),
-                      
-                    ),
+                      );
+                    },
                   ),
-                  
-                ),const SizedBox(height: 20,),
-        // =========================================
-        // 🏷️ SAVE / DISCARD BUTTONS
-        // =========================================
+                  const SizedBox(height: 20),
 
-            SaveDiscardButtons(
-              
-                  showButtons: !isRecording && filePath != null,
-                  hasMadeChoice: hasmadeChoice,
-                  onSave: saveRecording,
-                  onDiscard: discardRecording,
-                ),
+                  // Stop button
+                  if (!showExtraButtons)
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        shape: const CircleBorder(),
+                        padding: const EdgeInsets.all(20),
+                        backgroundColor: Colors.orangeAccent,
+                      ),
+                     onPressed: () async {
+                      
+                        await stopRecording();
+
+                        String processedFile = filePath!;
+                        try {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text("Processing audio...")),
+                          );
+
+                          // Convert + remove silence + enhance
+                          processedFile = await AudioProcessor.process(filePath!);
+                        } catch (e) {
+                          print("Audio processing failed: $e");
+                          processedFile = filePath!; // fallback
+                        }
+
+                        // Set processed audio for playback
+                        filePath = processedFile;
+                        cleanedFilePath = processedFile;
+
+                        // Show playback slider and save/discard buttons
+                        setModalState(() => showExtraButtons = true);
+                      },
+                      child: const Icon(
+                        Icons.stop,
+                        size: 30,
+                        color: Colors.white,
+                      ),
+                    ),
+                  const SizedBox(height: 20),
+
+                  // Play / Slider for recording (use cleaned file if available)
+                  if (showExtraButtons && cleanedFilePath != null)
+                    AudioPlayerControls(
+                      audioPlayer: bottomSheetAudioPlayer,
+                      filePath: cleanedFilePath!,
+                    ),
+                  const SizedBox(height: 20),
+
+                  // Save / Discard buttons
+                  if (showExtraButtons)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                            ),
+                            onPressed: () async {
+                              if (cleanedFilePath != null && await File(cleanedFilePath!).exists()) {
+                                final directory = await getExternalStorageDirectory();
+                                final savePath = '${directory!.path}/${titleController.text.trim()}.wav';
+                                final savedFile = await File(cleanedFilePath!).copy(savePath);
+
+                                try {
+                                  final baseName = titleController.text.trim();
+                                  final files = directory.listSync();
+                                  for (var file in files) {
+                                    if (file is File && file.path.endsWith(".aac") && file.path.contains(baseName)) {
+                                      await file.delete();
+                                      print("🗑️ Deleted matching AAC file: ${file.path}");
+                                    }
+                                  }
+                                } catch (e) {
+                                  print("⚠️ Error deleting AAC file: $e");
+                                }
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Trimmed recording saved locally as "${savedFile.path}"'),
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+
+                                setState(() {
+                                  isRecording = false;
+                                  filePath = null;
+                                  cleanedFilePath = null;
+                                  titleController.clear();
+                                });
+
+                                Navigator.pop(context);
+                              }
+                            },
+                            child: const Text(
+                              'Save',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          ),
+                          //discard button
+                        ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                            ),
+                            onPressed: () async {
+                              try {
+                                final directory = await getExternalStorageDirectory();
+                                final baseName = titleController.text.trim();
+
+                                // 🧹 Delete temp recorded AAC file
+                                if (filePath != null && await File(filePath!).exists()) {
+                                  await File(filePath!).delete();
+                                  print("🗑️ Deleted temp AAC file: ${filePath!}");
+                                }
+
+                                // 🧹 Delete processed WAV file (if exists)
+                                if (cleanedFilePath != null && await File(cleanedFilePath!).exists()) {
+                                  await File(cleanedFilePath!).delete();
+                                  print("🗑️ Deleted cleaned WAV file: ${cleanedFilePath!}");
+                                }
+
+                                // 🧹 Extra safety — delete any stray AAC/WAV with same name in folder
+                                final files = directory!.listSync();
+                                for (var file in files) {
+                                  if (file is File &&
+                                      (file.path.endsWith(".aac") || file.path.endsWith(".wav")) &&
+                                      file.path.contains(baseName)) {
+                                    await file.delete();
+                                    print("🧽 Cleaned leftover file: ${file.path}");
+                                  }
+                                }
+
+                                // Reset states
+                                setState(() {
+                                  isRecording = false;
+                                  titleController.clear();
+                                  filePath = null;
+                                  cleanedFilePath = null;
+                                });
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Recording discarded and all temporary files deleted'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+
+                                Navigator.pop(context);
+                              } catch (e) {
+                                print("⚠️ Error discarding files: $e");
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error deleting files: $e')),
+                                );
+                              }
+                            },
+                            child: const Text(
+                              'Discard',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
 
 
-    
-      // ───────── (PLACEHOLDER FOR FUTURE FEATURES) ─────────
-         // Here’s where you can later add:
-            // - Play / Pause preview buttons
-            // - Save / Discard buttons
-            // - Upload status indicators
-
-          ],
-    ),
-
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: GestureDetector(
+          onTap: () async {
+            if (!isRecording) {
+              await startRecording();
+            }
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            height: 200,
+            width: 200,
+            child: NeuBox(
+              isPressed: isRecording,
+              child: Icon(
+                isRecording ? Icons.stop : Icons.mic,
+                size: 100,
+                color: const Color.fromARGB(255, 0, 0, 0),
+              ),
+            ),
+          ),
+        ),
       ),
-
     );
-  
   }
 }

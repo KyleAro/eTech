@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import '../database/firebase_con.dart';
+import '../database/firestore_con.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,24 +24,8 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
   String result = "";
   bool loading = false;
 
-  // Upload audio to Firebase Storage
-  Future<String> uploadToPrediction(String path, String gender) async {
-    try {
-      final folderName =
-          gender.toLowerCase() == 'male' ? 'Male Ducklings' : 'Female Ducklings';
-      final storageRef = FirebaseStorage.instance.ref().child(folderName);
-      final originalName = path.split('/').last;
-      final fileName = "${gender}_$originalName";
-      final fileRef = storageRef.child(fileName);
-
-      await fileRef.putFile(File(path));
-      final downloadUrl = await fileRef.getDownloadURL();
-      return downloadUrl;
-    } catch (e) {
-      print("Upload error: $e");
-      return '';
-    }
-  }
+  final FirebaseConnect _storageService = FirebaseConnect();
+  final FirestoreConnect _firestoreService = FirestoreConnect();
 
   Future<void> _pickAndSendFile() async {
     FilePickerResult? resultPicker =
@@ -77,8 +61,8 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
     );
 
     try {
-      var request = http.MultipartRequest(
-          'POST', Uri.parse("http://192.168.1.8:5000/predict"));
+      var request =
+          http.MultipartRequest('POST', Uri.parse("http://192.168.1.8:5000/predict"));
       request.files.add(await http.MultipartFile.fromPath('file', file.path));
       var response = await request.send();
       var respStr = await response.stream.bytesToString();
@@ -90,30 +74,22 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
         String prediction = data['prediction'];
         double confidence = data['confidence'];
 
-        String downloadUrl = await uploadToPrediction(file.path, prediction);
+        // ✅ Upload audio to Firebase Storage
+        String downloadUrl =
+            await _storageService.uploadToPrediction(file.path, prediction);
 
-        String collectionName =
-            prediction.toLowerCase() == 'male' ? 'Male Ducklings' : 'Female Ducklings';
-        String category = "${prediction} Ducklings";
-        String originalName = file.path.split('/').last;
-        String renamedFile = "${prediction}_$originalName";
+        // ✅ Save data to Firestore
+        await _firestoreService.savePrediction(
+          prediction: prediction,
+          confidence: confidence,
+          downloadUrl: downloadUrl,
+          filePath: file.path,
+        );
 
-        await FirebaseFirestore.instance
-            .collection(collectionName)
-            .doc(renamedFile)
-            .set({
-          'File_Name': renamedFile,
-          'Category': category,
-          'Previous Prediction': 'Undetermined Ducklings',
-          'Final Prediction': prediction,
-          'Confidence_Percentage': confidence,
-          'Url': downloadUrl,
-          'Timestamp': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-
-        // Update result string to show below button
+        // ✅ Show result
         setState(() {
-          result = "✅ Prediction: $prediction\nConfidence: ${confidence.toStringAsFixed(2)}%";
+          result =
+              "✅ Prediction: $prediction\nConfidence: ${confidence.toStringAsFixed(2)}%";
         });
       } else {
         setState(() {

@@ -120,26 +120,27 @@ def predict():
     file.save(orig_path)
 
     converted_path = os.path.join('temp', f"{uuid.uuid4().hex}.wav")
+    cleaned_path = None  # will store path of cleaned audio
+
     try:
-        # convert to mono 16k wav (you said you already handle conversion elsewhere,
-        # but keeping this step ensures consistent SR/channels for cleaning)
+        # --- Convert to mono 16kHz WAV ---
         audio = AudioSegment.from_file(orig_path)
         audio = audio.set_channels(1).set_frame_rate(16000)
         audio.export(converted_path, format="wav")
-    except Exception as e:
-        print("Audio conversion failed:", e)
-        return jsonify({'error': f'Audio conversion failed: {e}'}), 500
 
-    try:
-        # load converted file as AudioSegment and clean/split into clips
+        # --- Load and clean/split ---
         audio_segment = AudioSegment.from_file(converted_path)
-        clips = clean_and_split_audio_segment(audio_segment, clip_length_ms=3000,
-                                              min_silence_len=400, silence_thresh=-40)
+        clips, cleaned_path = clean_and_split_audio_segment(
+            audio_segment,
+            clip_length_ms=3000,
+            min_silence_len=400,
+            silence_thresh=-40
+        )
 
         if not clips:
             raise ValueError("No valid clips after cleaning/splitting")
 
-        # Process clips in parallel
+        # --- Process clips in parallel ---
         max_workers = min(8, (os.cpu_count() or 2))
         all_probs = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -152,18 +153,18 @@ def predict():
         if not all_probs:
             raise ValueError("No valid predictions from any clip")
 
-        # average probabilities across clips
+        # --- Average probabilities and decide prediction ---
         avg_probs = np.mean(all_probs, axis=0)
-
-        # Decide prediction & confidence
         max_idx = int(np.argmax(avg_probs))
         pred_class = model.classes_[max_idx]
         gender = "Male" if "male" in pred_class.lower() else "Female"
-        confidence_val = float(avg_probs[max_idx])  # in 0..1
+        confidence_val = float(avg_probs[max_idx])
 
-        # Optional: also provide per-class percent values
-        confidence_male = float(avg_probs[model.classes_.tolist().index('male')]) * 100 if 'male' in model.classes_ else 0.0
-        confidence_female = float(avg_probs[model.classes_.tolist().index('female')]) * 100 if 'female' in model.classes_ else 0.0
+        # Optional: per-class confidence
+        confidence_male = float(avg_probs[model.classes_.tolist().index('male')]) * 100 \
+            if 'male' in model.classes_ else 0.0
+        confidence_female = float(avg_probs[model.classes_.tolist().index('female')]) * 100 \
+            if 'female' in model.classes_ else 0.0
 
         return jsonify({
             'prediction': gender.capitalize(),
@@ -178,10 +179,9 @@ def predict():
         return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
 
     finally:
-        if os.path.exists(orig_path):
-            os.remove(orig_path)
-        if os.path.exists(converted_path):
-            os.remove(converted_path)
-
+        # --- Cleanup all temp files safely ---
+        for path in [orig_path, converted_path, cleaned_path]:
+            if path and os.path.exists(path):
+                os.remove(path)
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000, debug=True)
