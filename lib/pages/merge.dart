@@ -135,10 +135,10 @@ Widget build(BuildContext context) {
                     decoration: BoxDecoration(
                       color: Colors.grey[850],
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.blueAccent, width: 2),
+                      border: Border.all(color: const Color.fromARGB(255, 240, 234, 159), width: 2),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.blueAccent.withOpacity(0.2),
+                          color: Color.fromARGB(255, 240, 234, 159),
                           blurRadius: 12,
                           offset: const Offset(0, 6),
                         ),
@@ -148,12 +148,12 @@ Widget build(BuildContext context) {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.upload_file, size: 55, color: Colors.blueAccent),
+                          Icon(Icons.upload_file, size: 55, color: Color.fromARGB(255, 240, 234, 159)),
                           SizedBox(height: 12),
                           Text(
                             "Tap to select audio file",
                             textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.white70, fontSize: 16),
+                            style: TextStyle(color: Colors.white70, fontSize: 21),
                           ),
                         ],
                       ),

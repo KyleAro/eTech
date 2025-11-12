@@ -26,7 +26,7 @@ class AudioProcessor {
     return outputFile.path;
   }
 
-  /// Remove dead air (silence) only
+  
   static Future<String> removeDeadAir(String inputPath) async {
     final dir = await getTemporaryDirectory();
     final outputFile = File('${dir.path}/deadair_removed_${DateTime.now().millisecondsSinceEpoch}.wav');

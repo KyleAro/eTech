@@ -1,4 +1,5 @@
 
+import 'package:etech/pages/MainPage.dart';
 import 'package:flutter/material.dart'hide BoxDecoration, BoxShadow;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_inset_box_shadow/flutter_inset_box_shadow.dart';
@@ -43,16 +44,16 @@ class NeuBox extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(99),
-        color: const Color.fromARGB(255, 223, 148, 10),
+        color: backgroundColor,
         boxShadow: [
           BoxShadow(
-            color: const Color.fromARGB(255, 117, 96, 32),
+            color: const Color.fromARGB(192, 192, 183, 78),
             blurRadius: blur,
             offset: -distance,
             inset: isPressed,
           ),
           BoxShadow(
-            color: const Color.fromARGB(134, 235, 163, 81),
+            color: const Color.fromARGB(195, 134, 126, 53),
             blurRadius: blur,
             offset: distance,
             inset: isPressed,

@@ -86,13 +86,13 @@ class _RecordPageState extends State<RecordPage> {
 
   showModalBottomSheet(
     context: context,
-    isDismissible: false,       // ✖ cannot tap outside
-    enableDrag: false,          // ✖ cannot swipe down
+    isDismissible: false,       
+    enableDrag: false,          
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (context) {
       return WillPopScope(
-        onWillPop: () async => false, // ✖ disables back button
+        onWillPop: () async => false, 
         child: StatefulBuilder(
           builder: (context, setModalState) {
             return FractionallySizedBox(
@@ -260,7 +260,7 @@ class _RecordPageState extends State<RecordPage> {
 
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text('Recording discarded and all temporary files deleted'),
+                                    content: Text('Recording discarded'),
                                     duration: Duration(seconds: 2),
                                   ),
                                 );
