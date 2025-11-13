@@ -217,7 +217,7 @@ class _RecordPageState extends State<RecordPage> {
                               }
                             },
                             child: const Text(
-                              'Save',
+                              'Predict',
                               style: TextStyle(color: Colors.white),
                             ),
                           ),

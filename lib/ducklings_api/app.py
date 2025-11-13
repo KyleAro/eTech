@@ -14,8 +14,8 @@ warnings.filterwarnings("ignore")
 app = Flask(__name__)
 
 # --- Load your saved model and scaler once ---
-MODEL_PATH = r"C:\Users\User\OneDrive - Innobyte\Desktop\etech\lib\python\duckling_svm_rbf_day4-13.pkl"
-SCALER_PATH = r"C:\Users\User\OneDrive - Innobyte\Desktop\etech\lib\python\duckling_scaler_day4-13.pkl"
+MODEL_PATH = r"duckling_svm_rbf_day4-13.pkl"
+SCALER_PATH = r"duckling_scaler_day4-13.pkl"
 
 model = joblib.load(MODEL_PATH)
 scaler = joblib.load(SCALER_PATH)
