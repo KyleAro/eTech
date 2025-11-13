@@ -103,6 +103,10 @@ def process_clip_predict_probs(clip):
         # Log and return None so it can be skipped
         print("Clip processing error:", e)
         return None
+    
+@app.route('/status', methods=['GET'])
+def status():
+    return jsonify({"status": "ready"}), 200
 
 # --- Prediction endpoint ---
 @app.route('/predict', methods=['POST'])

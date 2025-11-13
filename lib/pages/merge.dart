@@ -28,6 +28,78 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
   final FirebaseConnect _storageService = FirebaseConnect();
   final FirestoreConnect _firestoreService = FirestoreConnect();
 
+Future<void> wakeUpServer() async {
+  try {
+    var response = await http.get(Uri.parse("https://etech-3a97.onrender.com/status"));
+    if (response.statusCode == 200) {
+      print("✅ Server is active and ready to predict");
+      ScaffoldMessenger.of(context).showMaterialBanner(
+        MaterialBanner(
+          content: const Text(
+            "✅ Server is active and ready",
+            style: TextStyle(color: Colors.white),
+          ),
+          backgroundColor: Colors.green[700],
+          actions: [
+            TextButton(
+              onPressed: () {
+                ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+              },
+              child: const Text("DISMISS", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+    } else {
+      print("⚠️ Server responded but not ready: ${response.statusCode}");
+      ScaffoldMessenger.of(context).showMaterialBanner(
+        MaterialBanner(
+          content: Text(
+            "⚠️ Server not ready: ${response.statusCode}",
+            style: const TextStyle(color: Colors.white),
+          ),
+          backgroundColor: Colors.orange[700],
+          actions: [
+            TextButton(
+              onPressed: () {
+                ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+              },
+              child: const Text("DISMISS", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+    }
+  } catch (e) {
+    print("❌ Server is sleeping or unreachable: $e");
+    ScaffoldMessenger.of(context).showMaterialBanner(
+      MaterialBanner(
+        content: const Text(
+          "❌ Server is sleeping or unreachable",
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.red[700],
+        actions: [
+          TextButton(
+            onPressed: () {
+              ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+            },
+            child: const Text("DISMISS", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+@override
+void initState() {
+  super.initState();
+
+
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    wakeUpServer();
+  });
+}
   Future<void> _pickAndSendFile() async {
     FilePickerResult? resultPicker =
         await FilePicker.platform.pickFiles(type: FileType.audio);
@@ -62,13 +134,15 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
     );
 
     try {
-      var request =
-          http.MultipartRequest('POST', Uri.parse("http://192.168.1.9:5000/predict"));
+      var request = http.MultipartRequest(
+  'POST', 
+  Uri.parse("https://etech-3a97.onrender.com/predict")
+);
       request.files.add(await http.MultipartFile.fromPath('file', file.path));
       var response = await request.send();
       var respStr = await response.stream.bytesToString();
 
-      Navigator.pop(context); // close loader
+      Navigator.pop(context); 
 
       if (response.statusCode == 200) {
         var data = json.decode(respStr);
