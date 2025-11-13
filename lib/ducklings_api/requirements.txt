@@ -5,3 +5,4 @@ joblib
 pydub
 soundfile
 werkzeug
+pandas
