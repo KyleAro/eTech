@@ -6,3 +6,4 @@ pydub
 soundfile
 werkzeug
 pandas
+imageio-ffmpeg
