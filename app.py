@@ -11,10 +11,6 @@ app = Flask(__name__)
 model = joblib.load("duckling_svm_rbf_day4-13.pkl")
 scaler = joblib.load("duckling_scaler_day4-13.pkl")
 
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-
 # -------------------------------
 # 🔥 HELPER: Probability Sharpening
 # -------------------------------
@@ -111,6 +107,6 @@ def predict():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  
+    port = int(os.environ.get("PORT", 5000))  # Use Render's PORT env variable
     app.run(host="0.0.0.0", port=port)
 
