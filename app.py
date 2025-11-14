@@ -4,10 +4,12 @@ import librosa
 from flask import Flask, request, jsonify
 import joblib
 from pydub import AudioSegment
+from io import BytesIO
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
+# Load model and scaler
 model = joblib.load("duckling_svm_rbf_day4-13.pkl")
 scaler = joblib.load("duckling_scaler_day4-13.pkl")
 
@@ -20,47 +22,30 @@ def sharpen_probabilities(p, temp=0.35):
     p /= np.sum(p)
     return p
 
-
 # -------------------------------
 # 🔥 HELPER: Detect Duckling Squeak Frames
 # -------------------------------
 def detect_squeak_frames(y, sr):
     hop = 256
     win = 512
-
     energy = librosa.feature.rms(y=y, frame_length=win, hop_length=hop)[0]
     centroid = librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=hop)[0]
-
-    # Duckling squeaks are LOUD + HIGH FREQUENCY
     energy_th = np.percentile(energy, 70)
-    freq_th = 3800  # ducklings squeaks: 4k–12k Hz
-
+    freq_th = 3800  # Duckling squeaks: 4k–12k Hz
     valid = (energy > energy_th) & (centroid > freq_th)
-
     return valid
-
 
 # -------------------------------
 # 🔥 MAIN FEATURE EXTRACTION
 # -------------------------------
-def extract_squeak_features(file_path):
-    y, sr = librosa.load(file_path, sr=None)
-    y = librosa.util.normalize(y)
-
+def extract_squeak_features(y, sr):
     valid_frames = detect_squeak_frames(y, sr)
-
     if not np.any(valid_frames):
-        return None  # No squeak detected
-
-    # Use only the frames where squeaks exist
+        return None
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)
     squeak_mfcc = mfcc[:, valid_frames]
-
-    # Single feature vector (mean of squeaky frames)
     features = np.mean(squeak_mfcc, axis=1)
-
     return features
-
 
 # -------------------------------
 # 🔥 API ENDPOINT
@@ -72,29 +57,34 @@ def predict():
 
     audio_file = request.files["audio"]
     filename = secure_filename(audio_file.filename)
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    audio_file.save(filepath)
-
-    # Convert to WAV if M4A/MP3
     ext = filename.lower().split(".")[-1]
-    if ext in ["m4a", "mp3"]:
-        sound = AudioSegment.from_file(filepath, format=ext)
-        filepath = filepath.replace(f".{ext}", ".wav")
-        sound.export(filepath, format="wav")
 
-    # Extract DUCKLING squeak features
-    features = extract_squeak_features(filepath)
+    # Read file into memory
+    audio_bytes = BytesIO(audio_file.read())
 
+    # Convert to WAV in memory if needed
+    if ext in ["mp3", "m4a"]:
+        sound = AudioSegment.from_file(audio_bytes, format=ext)
+        wav_bytes = BytesIO()
+        sound.export(wav_bytes, format="wav")
+        wav_bytes.seek(0)
+    else:
+        wav_bytes = audio_bytes
+        wav_bytes.seek(0)
+
+    # Load audio with librosa directly from memory
+    y, sr = librosa.load(wav_bytes, sr=None)
+    y = librosa.util.normalize(y)
+
+    # Extract features
+    features = extract_squeak_features(y, sr)
     if features is None:
         return jsonify({"error": "No duckling squeak detected"}), 200
 
-    # Scale + Predict
+    # Scale + predict
     features_scaled = scaler.transform([features])
     raw_probs = model.predict_proba(features_scaled)[0]
-
-    # Sharpen probabilities (boost confidence)
     probs = sharpen_probabilities(raw_probs, temp=0.35)
-
     pred = model.classes_[np.argmax(probs)]
     conf = float(np.max(probs) * 100)
 
@@ -105,8 +95,9 @@ def predict():
         "sharpened_probabilities": probs.tolist()
     })
 
-
+# -------------------------------
+# 🔥 RUN SERVER
+# -------------------------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Use Render's PORT env variable
+    port = int(os.environ.get("PORT", 5000))  # Render port
     app.run(host="0.0.0.0", port=port)
-
