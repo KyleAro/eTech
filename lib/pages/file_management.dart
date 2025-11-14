@@ -44,7 +44,8 @@ class _FileManagementState extends State<FileManagement> {
       try {
         final files = await Directory(directory.path)
             .list()
-            .where((file) => file.path.toLowerCase().endsWith(".aac") || file.path.toLowerCase().endsWith(".wav"))
+            .where((file) => file.path.toLowerCase().endsWith(".wav") &&
+                file.path.contains("Undetermined")) // only cleaned WAVs
             .toList();
 
         setState(() {
