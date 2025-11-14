@@ -138,7 +138,7 @@ void initState() {
   'POST', 
   Uri.parse("https://etech-rgsx.onrender.com/predict")
 );
-      request.files.add(await http.MultipartFile.fromPath('file', file.path));
+      request.files.add(await http.MultipartFile.fromPath('audio', file.path));
       var response = await request.send();
       var respStr = await response.stream.bytesToString();
 

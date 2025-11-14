@@ -44,22 +44,32 @@ def detect_squeak_frames(y, sr):
     return valid
 
 
-# -------------------------------
+# ------------------------------- 
 # 🔥 HELPER: Feature Extraction
 # -------------------------------
 def extract_squeak_features(file_path):
     y, sr = librosa.load(file_path, sr=None)
     y = librosa.util.normalize(y)
 
+    hop_length = 256  # MUST match detect_squeak_frames
     valid_frames = detect_squeak_frames(y, sr)
-    if not np.any(valid_frames):
-        return None
 
-    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)
+    # Compute MFCC using same hop_length
+    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20, hop_length=hop_length)
+
+    # Safety: truncate or pad valid_frames to match MFCC frame count
+    if len(valid_frames) < mfcc.shape[1]:
+        valid_frames = np.pad(valid_frames, (0, mfcc.shape[1] - len(valid_frames)), constant_values=False)
+    elif len(valid_frames) > mfcc.shape[1]:
+        valid_frames = valid_frames[:mfcc.shape[1]]
+
     squeak_mfcc = mfcc[:, valid_frames]
+    if squeak_mfcc.shape[1] == 0:  # no valid frames
+        return None
 
     features = np.mean(squeak_mfcc, axis=1)
     return features
+
 
 
 # -------------------------------
