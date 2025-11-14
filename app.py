@@ -17,7 +17,6 @@ scaler = joblib.load("duckling_scaler_day4-13.pkl")
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-
 # -------------------------------
 # 🔥 HELPER: Probability Sharpening
 # -------------------------------
@@ -25,7 +24,6 @@ def sharpen_probabilities(p, temp=0.35):
     p = np.power(p, 1 / temp)
     p /= np.sum(p)
     return p
-
 
 # -------------------------------
 # 🔥 HELPER: Detect Duckling Squeak Frames
@@ -38,39 +36,40 @@ def detect_squeak_frames(y, sr):
     centroid = librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=hop)[0]
 
     energy_th = np.percentile(energy, 70)
-    freq_th = 3800  # ducklings squeaks: 4k–12k Hz
+    freq_th = 3800  # duckling squeaks: ~4k–12k Hz
 
     valid = (energy > energy_th) & (centroid > freq_th)
     return valid
 
-
-# ------------------------------- 
-# 🔥 HELPER: Feature Extraction
+# -------------------------------
+# 🔥 FEATURE EXTRACTION
 # -------------------------------
 def extract_squeak_features(file_path):
     y, sr = librosa.load(file_path, sr=None)
     y = librosa.util.normalize(y)
 
-    hop_length = 256  # MUST match detect_squeak_frames
+    # Detect squeak frames
     valid_frames = detect_squeak_frames(y, sr)
+    if not np.any(valid_frames):
+        return None  # No duckling squeak detected
 
-    # Compute MFCC using same hop_length
-    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20, hop_length=hop_length)
-
-    # Safety: truncate or pad valid_frames to match MFCC frame count
-    if len(valid_frames) < mfcc.shape[1]:
-        valid_frames = np.pad(valid_frames, (0, mfcc.shape[1] - len(valid_frames)), constant_values=False)
-    elif len(valid_frames) > mfcc.shape[1]:
-        valid_frames = valid_frames[:mfcc.shape[1]]
-
+    # --- MFCCs (13) ---
+    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
     squeak_mfcc = mfcc[:, valid_frames]
-    if squeak_mfcc.shape[1] == 0:  # no valid frames
-        return None
+    mfcc_mean = np.mean(squeak_mfcc, axis=1)
 
-    features = np.mean(squeak_mfcc, axis=1)
+    # --- Spectral features ---
+    spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
+    spectral_rolloff = np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))
+    zero_crossing_rate = np.mean(librosa.feature.zero_crossing_rate(y))
+
+    # --- Pitch ---
+    pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
+    pitch = np.mean(pitches[pitches > 0]) if np.any(pitches > 0) else 0
+
+    # Combine into single feature vector (17 features total)
+    features = np.hstack([mfcc_mean, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
     return features
-
-
 
 # -------------------------------
 # 🔥 STATUS ENDPOINT
@@ -78,20 +77,12 @@ def extract_squeak_features(file_path):
 @app.route("/status", methods=["GET"])
 def status():
     try:
-        # Example check: see if model and scaler are loaded
         if model is None or scaler is None:
-            # Something critical missing → 500
             return jsonify({"status": "Model or scaler not loaded"}), 500
-
-        # Server ready
         return jsonify({"status": "Server is running"}), 200
-
     except FileNotFoundError:
-        # Required files missing → 404
         return jsonify({"status": "Required files not found"}), 404
-
     except Exception as e:
-        # Any other error → 503
         return jsonify({"status": f"Server error: {str(e)}"}), 503
 
 # -------------------------------
@@ -114,10 +105,12 @@ def predict():
         filepath = filepath.replace(f".{ext}", ".wav")
         sound.export(filepath, format="wav")
 
+    # Extract features
     features = extract_squeak_features(filepath)
     if features is None:
         return jsonify({"error": "No duckling squeak detected"}), 200
 
+    # Scale + Predict
     features_scaled = scaler.transform([features])
     raw_probs = model.predict_proba(features_scaled)[0]
     probs = sharpen_probabilities(raw_probs, temp=0.35)
