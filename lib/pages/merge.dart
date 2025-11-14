@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import '../database/firebase_con.dart';
 import '../database/firestore_con.dart';
+import 'dart:typed_data';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -100,89 +101,100 @@ void initState() {
     wakeUpServer();
   });
 }
-  Future<void> _pickAndSendFile() async {
-    FilePickerResult? resultPicker =
-        await FilePicker.platform.pickFiles(type: FileType.audio);
-    if (resultPicker == null) return;
+ Future<void> _pickAndSendFile() async {
+  FilePickerResult? resultPicker =
+      await FilePicker.platform.pickFiles(type: FileType.audio);
+  if (resultPicker == null) return;
 
-    File file = File(resultPicker.files.single.path!);
-    setState(() {
-      loading = true;
-      result = "";
-    });
+  File file = File(resultPicker.files.single.path!);
+  setState(() {
+    loading = true;
+    result = "";
+  });
 
-    // Loader dialog
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(
-              color: Color.fromARGB(255, 243, 255, 68),
-              strokeWidth: 5,
-            ),
-            SizedBox(height: 15),
-            Text(
-              "Analyzing audio...",
-              style: TextStyle(color: Colors.white, fontSize: 16),
-            )
-          ],
-        ),
+  // Loader dialog
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(
+            color: Color.fromARGB(255, 243, 255, 68),
+            strokeWidth: 5,
+          ),
+          SizedBox(height: 15),
+          Text(
+            "Analyzing audio...",
+            style: TextStyle(color: Colors.white, fontSize: 16),
+          )
+        ],
       ),
+    ),
+  );
+
+  try {
+    // Send audio to Flask server
+    var request = http.MultipartRequest(
+      'POST',
+      Uri.parse("https://etech-rgsx.onrender.com/predict"),
     );
+    request.files.add(await http.MultipartFile.fromPath('audio', file.path));
+    var response = await request.send();
+    var respStr = await response.stream.bytesToString();
 
-    try {
-      var request = http.MultipartRequest(
-  'POST', 
-  Uri.parse("https://etech-rgsx.onrender.com/predict")
-);
-      request.files.add(await http.MultipartFile.fromPath('audio', file.path));
-      var response = await request.send();
-      var respStr = await response.stream.bytesToString();
+    Navigator.pop(context); // close loader
 
-      Navigator.pop(context); 
+    if (response.statusCode == 200) {
+      var data = json.decode(respStr);
+      String prediction = data['prediction'];
+      prediction = prediction[0].toUpperCase() + prediction.substring(1);
+      double confidence = data['confidence'];
 
-      if (response.statusCode == 200) {
-        var data = json.decode(respStr);
-        String prediction = data['prediction'];
-        prediction = prediction[0].toUpperCase() + prediction.substring(1);
-        double confidence = data['confidence'];
+      // Decode Base64 WAV from server response
+        Uint8List wavBytes = base64Decode(data['wav_base64']);
 
-        // ✅ Upload audio to Firebase Storage
-        String downloadUrl =
-            await _storageService.uploadToPrediction(file.path, prediction);
+        // Keep the original name but replace extension with .wav
+        String originalName = file.path.split('/').last.split('.').first; // remove extension
+        String fileName = "${prediction}_$originalName.wav";
 
-        // ✅ Save data to Firestore
-        await _firestoreService.savePrediction(
-          prediction: prediction,
-          confidence: confidence,
-          downloadUrl: downloadUrl,
-          filePath: file.path,
+        // Upload WAV bytes
+        String downloadUrl = await _storageService.uploadBytes(
+          wavBytes,
+          fileName,
+          prediction
         );
 
-        // ✅ Show result
-        setState(() {
-          result =
-              "✅ Prediction: $prediction\nConfidence: ${confidence.toStringAsFixed(2)}%";
-        });
-      } else {
-        setState(() {
-          result = "❌ Server Error: ${response.statusCode}";
-        });
-      }
-    } catch (e) {
-      Navigator.pop(context);
+      // ✅ Save prediction info to Firestore
+      await _firestoreService.savePrediction(
+        prediction: prediction,
+        confidence: confidence,
+        downloadUrl: downloadUrl,
+        filePath: file.path,
+      );
+
+      // ✅ Show result
       setState(() {
-        result = "⚠️ Error: $e";
+        result =
+            "✅ Prediction: $prediction\nConfidence: ${confidence.toStringAsFixed(2)}%";
       });
-    } finally {
+    } else {
       setState(() {
-        loading = false;
+        result = "❌ Server Error: ${response.statusCode}";
       });
     }
+  } catch (e) {
+    Navigator.pop(context);
+    setState(() {
+      result = "⚠️ Error: $e";
+    });
+  } finally {
+    setState(() {
+      loading = false;
+    });
   }
+}
 
 @override
 Widget build(BuildContext context) {

@@ -1,39 +1,22 @@
-import 'dart:io';
+import 'dart:typed_data';
 import 'package:firebase_storage/firebase_storage.dart';
 
 class FirebaseConnect {
   final FirebaseStorage _storage = FirebaseStorage.instance;
 
-  
-  Future<String> uploadToPrediction(String path, String gender) async {
+  Future<String> uploadBytes(Uint8List data, String fileName, String gender) async {
     try {
-      
-      // Choose folder based on gender
       final folderName =
           gender.toLowerCase() == 'male' ? 'Male Ducklings' : 'Female Ducklings';
+      final ref = _storage.ref().child('$folderName/$fileName');
 
-      final storageRef = _storage.ref().child(folderName);
+      await ref.putData(data);
 
-      // Extract the original file name
-      final originalName = path.split('/').last;
-
-      // Add gender prefix to filename
-      final fileName = "${gender}_$originalName";
-
-      // Full path reference to the file in storage
-      final fileRef = storageRef.child(fileName);
-
-      // Upload the file
-      await fileRef.putFile(File(path));
-
-      // Get and return the file's download URL
-      final downloadUrl = await fileRef.getDownloadURL();
+      final downloadUrl = await ref.getDownloadURL();
       return downloadUrl;
     } catch (e) {
-      print("🔥 Firebase Storage upload error: $e");
+      print("🔥 Firebase Storage uploadBytes error: $e");
       return '';
-
-      
     }
   }
 }

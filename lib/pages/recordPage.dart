@@ -10,6 +10,9 @@ import '../database/firebase_con.dart';
 import '../database/firestore_con.dart';
 import '../widgets/stateful/audioplayer.dart';
 import '../widgets/stateful/audio_cleaner.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'dart:typed_data';
 
 class RecordPage extends StatefulWidget {
   @override
@@ -21,6 +24,7 @@ class _RecordPageState extends State<RecordPage> {
   TextEditingController titleController = TextEditingController();
   final FirebaseConnect _storageService = FirebaseConnect();
   final FirestoreConnect _firestoreService = FirestoreConnect();
+  bool isPredicting = false;
 
   bool isRecorderReady = false;
   bool isRecording = false;
@@ -78,7 +82,39 @@ class _RecordPageState extends State<RecordPage> {
     await recorder.stopRecorder();
     setState(() => isRecording = false);
   }
+Future<Map<String, dynamic>> _sendToMLServer(String filePath) async {
+  final uri = Uri.parse("https://etech-rgsx.onrender.com/predict");
 
+  final request = http.MultipartRequest("POST", uri);
+
+  request.files.add(await http.MultipartFile.fromPath("audio", filePath));
+
+  final response = await request.send();
+
+  if (response.statusCode != 200) {
+    throw Exception("Server error: ${response.statusCode}");
+  }
+
+  final respStr = await response.stream.bytesToString();
+  return jsonDecode(respStr);
+}
+void _showPredictionDialog(String gender, double confidence) {
+  showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: Text("Prediction Result"),
+      content: Text(
+        "Gender: $gender\nConfidence: ${confidence.toStringAsFixed(2)}%",
+      ),
+      actions: [
+        TextButton(
+          child: Text("OK"),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ],
+    ),
+  );
+}
   void _showRecordingBottomSheet() {
   bool showExtraButtons = false;
   String? cleanedFilePath;
@@ -92,7 +128,7 @@ class _RecordPageState extends State<RecordPage> {
     backgroundColor: Colors.transparent,
     builder: (context) {
       return WillPopScope(
-        onWillPop: () async => false, 
+        onWillPop: () async => !isPredicting,
         child: StatefulBuilder(
           builder: (context, setModalState) {
             return FractionallySizedBox(
@@ -175,52 +211,80 @@ class _RecordPageState extends State<RecordPage> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-                            ),
-                            onPressed: () async {
-                              if (cleanedFilePath != null && await File(cleanedFilePath!).exists()) {
-                                final directory = await getExternalStorageDirectory();
-                                final savePath = '${directory!.path}/${titleController.text.trim()}.wav';
-                                final savedFile = await File(cleanedFilePath!).copy(savePath);
+                          
+                               ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: isPredicting ? Colors.grey : Colors.blueAccent,
+                                      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                                    ),
+                                    onPressed: (cleanedFilePath == null || isPredicting) 
+                                        ? null 
+                                        : () async {
+                                            setState(() => isPredicting = true); // disable button
 
-                                try {
-                                  final baseName = titleController.text.trim();
-                                  final files = directory.listSync();
-                                  for (var file in files) {
-                                    if (file is File && file.path.endsWith(".aac") && file.path.contains(baseName)) {
-                                      await file.delete();
-                                      print("🗑️ Deleted matching AAC file: ${file.path}");
-                                    }
-                                  }
-                                } catch (e) {
-                                  print("⚠️ Error deleting AAC file: $e");
-                                }
+                                            try {
+                                              // STEP 1: Send file to server
+                                              final predictionData = await _sendToMLServer(cleanedFilePath!);
 
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Trimmed recording saved locally as "${savedFile.path}"'),
-                                    duration: const Duration(seconds: 2),
+                                              // STEP 2: Decode WAV returned by server
+                                              Uint8List wavBytes = base64Decode(predictionData['wav_base64']);
+
+                                              // STEP 3: Generate filename
+                                              String baseName = titleController.text.trim();
+                                              String gender = predictionData['prediction'];
+                                              String fileName = "${gender}_${baseName}.wav";
+
+                                              // STEP 4: Upload WAV to Firebase Storage
+                                              String downloadUrl = await _storageService.uploadBytes(
+                                                wavBytes,
+                                                fileName,
+                                                gender,
+                                              );
+
+                                              // STEP 5: Save to Firestore
+                                              await _firestoreService.savePrediction(
+                                                prediction: gender,
+                                                confidence: predictionData["confidence"],
+                                                downloadUrl: downloadUrl,
+                                                filePath: baseName,
+                                              );
+
+                                              // STEP 6: Show prediction dialog
+                                              _showPredictionDialog(
+                                                gender,
+                                                predictionData["confidence"],
+                                              );
+                                            } catch (e) {
+                                              print("Prediction error: $e");
+                                            } finally {
+                                              setState(() => isPredicting = false); // re-enable button
+                                            }
+                                          },
+                                    child: isPredicting
+                                        ? Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: const [
+                                              SizedBox(
+                                                width: 20,
+                                                height: 20,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2.5,
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                              SizedBox(width: 10),
+                                              Text(
+                                                'Predicting...',
+                                                style: TextStyle(color: Colors.white),
+                                              ),
+                                            ],
+                                          )
+                                        : const Text(
+                                            'Predict',
+                                            style: TextStyle(color: Colors.white),
+                                          ),
                                   ),
-                                );
 
-                                setState(() {
-                                  isRecording = false;
-                                  filePath = null;
-                                  cleanedFilePath = null;
-                                  titleController.clear();
-                                });
-
-                                Navigator.pop(context); // close sheet
-                              }
-                            },
-                            child: const Text(
-                              'Save',
-                              style: TextStyle(color: Colors.white),
-                            ),
-                          ),
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color.fromARGB(255, 223, 111, 103),

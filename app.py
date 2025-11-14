@@ -6,6 +6,7 @@ import joblib
 from pydub import AudioSegment
 from werkzeug.utils import secure_filename
 import base64
+import tempfile
 
 app = Flask(__name__)
 
@@ -19,70 +20,48 @@ UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # -------------------------------
-# 🔥 HELPER: Probability Sharpening
+# 🔥 HELPER FUNCTIONS
 # -------------------------------
+
 def sharpen_probabilities(p, temp=0.35):
-    """Increase confidence by sharpening probabilities."""
     p = np.power(p, 1 / temp)
     p /= np.sum(p)
     return p
 
-# -------------------------------
-# 🔥 HELPER: Detect Duckling Squeak Frames
-# -------------------------------
 def detect_squeak_frames(y, sr, hop=256, win=512):
-    """Return a boolean mask for frames containing duckling squeaks."""
     energy = librosa.feature.rms(y=y, frame_length=win, hop_length=hop)[0]
     centroid = librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=hop)[0]
-
     energy_th = np.percentile(energy, 70)
-    freq_th = 3800  # duckling squeaks are high-pitched
-
+    freq_th = 3800
     valid = (energy > energy_th) & (centroid > freq_th)
     return valid
 
-# -------------------------------
-# 🔥 HELPER: Feature Extraction
-# -------------------------------
 def extract_squeak_features(file_path):
     y, sr = librosa.load(file_path, sr=None)
     y = librosa.util.normalize(y)
-
-    hop = 256  # frame hop consistent across features
+    hop = 256
     valid_frames = detect_squeak_frames(y, sr, hop=hop)
     if not np.any(valid_frames):
         return None
-
-    # MFCCs (13) for squeaky frames
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13, hop_length=hop)
     squeak_mfcc = mfcc[:, valid_frames]
     mfcc_mean = np.mean(squeak_mfcc, axis=1)
-
-    # Spectral features
     spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=hop))
     spectral_rolloff = np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr, hop_length=hop))
     zero_crossing_rate = np.mean(librosa.feature.zero_crossing_rate(y, hop_length=hop))
-
-    # Pitch
     pitches, magnitudes = librosa.piptrack(y=y, sr=sr, hop_length=hop)
     pitch = np.mean(pitches[pitches > 0]) if np.any(pitches > 0) else 0
-
-    # Combine all 17 features
     features = np.hstack([mfcc_mean, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
     return features
-# -------------------------------
-# 🔥 HELPER: Extract waveform
-# -------------------------------
+
 def extract_waveform(file_path, target_length=1000):
     y, sr = librosa.load(file_path, sr=None)
     y = librosa.util.normalize(y)
-
     if len(y) > target_length:
         factor = len(y) // target_length
         y_down = y[::factor]
     else:
         y_down = y
-
     return y_down.tolist()
 
 # -------------------------------
@@ -94,8 +73,6 @@ def status():
         if model is None or scaler is None:
             return jsonify({"status": "Model or scaler not loaded"}), 500
         return jsonify({"status": "Server is running"}), 200
-    except FileNotFoundError:
-        return jsonify({"status": "Required files not found"}), 404
     except Exception as e:
         return jsonify({"status": f"Server error: {str(e)}"}), 503
 
@@ -104,48 +81,65 @@ def status():
 # -------------------------------
 @app.route("/predict", methods=["POST"])
 def predict():
-    if "audio" not in request.files:
-        return jsonify({"error": "No audio uploaded"}), 400
+    import tempfile
+    import os
+    import base64
+    from werkzeug.utils import secure_filename
+    from pydub import AudioSegment
 
-    audio_file = request.files["audio"]
-    filename = secure_filename(audio_file.filename)
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    audio_file.save(filepath)
+    # ------------------------------
+    # Determine audio source
+    # ------------------------------
+    audio_file = request.files.get("audio")
+    audio_base64 = request.json.get("audio_base64") if request.is_json else None
+
+    if not audio_file and not audio_base64:
+        return jsonify({"error": "No audio provided"}), 400
+
+    # Save audio to temp file
+    if audio_file:
+        filename = secure_filename(audio_file.filename)
+        temp_path = os.path.join(tempfile.gettempdir(), filename)
+        audio_file.save(temp_path)
+    else:
+        filename = "recorded.wav"
+        temp_path = os.path.join(tempfile.gettempdir(), filename)
+        with open(temp_path, "wb") as f:
+            f.write(base64.b64decode(audio_base64))
 
     # Convert to WAV if needed
-    ext = filename.lower().split(".")[-1]
-    if ext in ["m4a", "mp3"]:
-        sound = AudioSegment.from_file(filepath, format=ext)
-        filepath = filepath.replace(f".{ext}", ".wav")
-        sound.export(filepath, format="wav")
+    ext = filename.split('.')[-1].lower()
+    if ext in ["m4a", "mp3", "aac"]:
+        sound = AudioSegment.from_file(temp_path, format=ext)
+        wav_path = temp_path.rsplit(".", 1)[0] + ".wav"
+        sound.export(wav_path, format="wav")
+        os.remove(temp_path)
+        temp_path = wav_path
 
-    # Extract features
-    features = extract_squeak_features(filepath)
-    if features is None:
-        return jsonify({"error": "No duckling squeak detected"}), 200
+    try:
+        # Extract features, predict, encode WAV
+        features = extract_squeak_features(temp_path)
+        if features is None:
+            return jsonify({"error": "No duckling squeak detected"}), 200
 
-    # Scale + predict
-    features_scaled = scaler.transform([features])
-    raw_probs = model.predict_proba(features_scaled)[0]
-    probs = sharpen_probabilities(raw_probs, temp=0.35)
+        features_scaled = scaler.transform([features])
+        raw_probs = model.predict_proba(features_scaled)[0]
+        probs = sharpen_probabilities(raw_probs)
+        pred = model.classes_[np.argmax(probs)]
+        conf = float(np.max(probs) * 100)
 
-    pred = model.classes_[np.argmax(probs)]
-    conf = float(np.max(probs) * 100)
-    waveform = extract_waveform(filepath, target_length=1000)
-    # Encode WAV file as Base64
-    with open(filepath, "rb") as f:
-        wav_bytes = f.read()
-    wav_base64 = base64.b64encode(wav_bytes).decode("utf-8")
+        # Encode WAV as Base64 for Flutter
+        with open(temp_path, "rb") as f:
+            wav_base64 = base64.b64encode(f.read()).decode("utf-8")
 
-    return jsonify({
-        "prediction": pred,
-        "confidence": round(conf, 2),
-        "raw_probabilities": raw_probs.tolist(),
-        "sharpened_probabilities": probs.tolist(),
-        "waveform": waveform,
-        "wav_base64": wav_base64,
-    })
-
+        return jsonify({
+            "prediction": pred,
+            "confidence": round(conf, 2),
+            "wav_base64": wav_base64,
+        })
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 # -------------------------------
 # 🔥 RUN SERVER
 # -------------------------------
