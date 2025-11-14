@@ -10,9 +10,6 @@ import '../database/firebase_con.dart';
 import '../database/firestore_con.dart';
 import '../widgets/stateful/audioplayer.dart';
 import '../widgets/stateful/audio_cleaner.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-
 
 class RecordPage extends StatefulWidget {
   @override
@@ -32,9 +29,7 @@ class _RecordPageState extends State<RecordPage> {
   @override
   void initState() {
     super.initState();
-    
     initRecorder();
-     wakeUpServer();
   }
 
   @override
@@ -83,42 +78,31 @@ class _RecordPageState extends State<RecordPage> {
     await recorder.stopRecorder();
     setState(() => isRecording = false);
   }
-Future<void> wakeUpServer() async {
-  try {
-    var response = await http.get(Uri.parse("https://etech-3a97.onrender.com/predict"));
-    print("Server wake-up status: ${response.statusCode}");
-  } catch (e) {
-    print("Server still sleeping...");
-  }
-}
+
   void _showRecordingBottomSheet() {
   bool showExtraButtons = false;
-  bool predictionDone = false;
-  bool loadingPrediction = false; // Prevent spam clicks
   String? cleanedFilePath;
-  String? predictionResult;
   final bottomSheetAudioPlayer = AudioPlayerService();
 
   showModalBottomSheet(
     context: context,
-    isDismissible: false,
-    enableDrag: false,
+    isDismissible: false,       
+    enableDrag: false,          
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (context) {
       return WillPopScope(
-        onWillPop: () async => false,
+        onWillPop: () async => false, 
         child: StatefulBuilder(
           builder: (context, setModalState) {
             return FractionallySizedBox(
-              heightFactor: 0.8,
+              heightFactor: 0.6,
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
                   color: Colors.grey[900],
-                  borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(20)),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
                 ),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -128,12 +112,11 @@ Future<void> wakeUpServer() async {
                       titleController: titleController,
                     ),
                     const SizedBox(height: 20),
+                    // Timer
                     StreamBuilder<RecordingDisposition>(
                       stream: recorder.onProgress,
                       builder: (context, snapshot) {
-                        final duration = snapshot.hasData
-                            ? snapshot.data!.duration
-                            : Duration.zero;
+                        final duration = snapshot.hasData ? snapshot.data!.duration : Duration.zero;
                         final text =
                             '${duration.inMinutes.toString().padLeft(2, '0')}:${(duration.inSeconds % 60).toString().padLeft(2, '0')}';
                         return Text(
@@ -147,7 +130,7 @@ Future<void> wakeUpServer() async {
                       },
                     ),
                     const SizedBox(height: 20),
-                    // Stop recording button
+                    // Stop button
                     if (!showExtraButtons)
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(
@@ -160,11 +143,10 @@ Future<void> wakeUpServer() async {
                           String processedFile = filePath!;
                           try {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text("Processing audio...")),
+                              const SnackBar(content: Text("Processing audio...")),
                             );
-                            processedFile =
-                                await AudioProcessor.process(filePath!);
+
+                            processedFile = await AudioProcessor.process(filePath!);
                           } catch (e) {
                             print("Audio processing failed: $e");
                             processedFile = filePath!;
@@ -182,120 +164,121 @@ Future<void> wakeUpServer() async {
                         ),
                       ),
                     const SizedBox(height: 20),
-                    // Audio player controls
                     if (showExtraButtons && cleanedFilePath != null)
                       AudioPlayerControls(
                         audioPlayer: bottomSheetAudioPlayer,
                         filePath: cleanedFilePath!,
                       ),
                     const SizedBox(height: 20),
-                    // Predict button
+                    // Save / Discard buttons
                     if (showExtraButtons)
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 40, vertical: 15),
-                        ),
-                        onPressed: predictionDone || loadingPrediction
-                            ? null
-                            : () async {
-                                if (cleanedFilePath != null &&
-                                    await File(cleanedFilePath!).exists()) {
-                                  setModalState(() => loadingPrediction = true);
-                                  showDialog(
-                                                context: context,
-                                                barrierDismissible: false,
-                                                builder: (context) => const Center(
-                                                  child: CircularProgressIndicator(
-                                                    color: Color.fromARGB(255, 168, 175, 76),
-                                                    strokeWidth: 5,
-                                                  ),
-                                                ),
-                                              );
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                            ),
+                            onPressed: () async {
+                              if (cleanedFilePath != null && await File(cleanedFilePath!).exists()) {
+                                final directory = await getExternalStorageDirectory();
+                                final savePath = '${directory!.path}/${titleController.text.trim()}.wav';
+                                final savedFile = await File(cleanedFilePath!).copy(savePath);
 
-                                  try {
-                                    var request = http.MultipartRequest(
-                                      'POST',
-                                      Uri.parse(
-                                          "https://etech-3a97.onrender.com/predict"),
-                                    );
-                                    request.files.add(
-                                        await http.MultipartFile.fromPath(
-                                      'file',
-                                      cleanedFilePath!,
-                                    ));
-
-                                    var response = await request.send();
-                                    var respStr =
-                                        await response.stream.bytesToString();
-
-                                    if (response.statusCode == 200) {
-                                      var data = json.decode(respStr);
-                                      String prediction = data['prediction'];
-                                      double confidence = data['confidence'];
-                                      predictionResult =
-                                          "$prediction (${confidence.toStringAsFixed(2)}%)";
-
-                                      // Show dialog with Save option
-                                      showDialog(
-                                        context: context,
-                                        builder: (context) => AlertDialog(
-                                          title:
-                                              const Text("Prediction Result"),
-                                          content: Text(predictionResult!),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(context),
-                                              child: const Text("OK"),
-                                            ),
-                                            TextButton(
-                                              onPressed: () async {
-                                                final directory =
-                                                    await getExternalStorageDirectory();
-                                                final savePath =
-                                                    '${directory!.path}/${titleController.text.trim()}.wav';
-                                                await File(cleanedFilePath!)
-                                                    .copy(savePath);
-
-                                                Navigator.pop(context); // close dialog
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(
-                                                  SnackBar(
-                                                    content: Text(
-                                                        'Recording saved locally as "${savePath.split('/').last}"'),
-                                                  ),
-                                                );
-                                              },
-                                              child: const Text("Save"),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    } else {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                            content: Text(
-                                                "Server Error: ${response.statusCode}")),
-                                      );
+                                try {
+                                  final baseName = titleController.text.trim();
+                                  final files = directory.listSync();
+                                  for (var file in files) {
+                                    if (file is File && file.path.endsWith(".aac") && file.path.contains(baseName)) {
+                                      await file.delete();
+                                      print("🗑️ Deleted matching AAC file: ${file.path}");
                                     }
-                                  } catch (e) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text("Error: $e")),
-                                    );
                                   }
-
-                                  setModalState(() {
-                                    predictionDone = true;
-                                    loadingPrediction = false;
-                                  });
+                                } catch (e) {
+                                  print("⚠️ Error deleting AAC file: $e");
                                 }
-                              },
-                        child: const Text(
-                          'Predict',
-                          style: TextStyle(color: Colors.white),
-                        ),
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Trimmed recording saved locally as "${savedFile.path}"'),
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+
+                                setState(() {
+                                  isRecording = false;
+                                  filePath = null;
+                                  cleanedFilePath = null;
+                                  titleController.clear();
+                                });
+
+                                Navigator.pop(context); // close sheet
+                              }
+                            },
+                            child: const Text(
+                              'Save',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          ),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color.fromARGB(255, 223, 111, 103),
+                              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                            ),
+                            onPressed: () async {
+                              try {
+                                final directory = await getExternalStorageDirectory();
+                                final baseName = titleController.text.trim();
+
+                                if (filePath != null && await File(filePath!).exists()) {
+                                  await File(filePath!).delete();
+                                  print("🗑️ Deleted temp AAC file: ${filePath!}");
+                                }
+
+                                if (cleanedFilePath != null && await File(cleanedFilePath!).exists()) {
+                                  await File(cleanedFilePath!).delete();
+                                  print("🗑️ Deleted cleaned WAV file: ${cleanedFilePath!}");
+                                }
+
+                                final files = directory!.listSync();
+                                for (var file in files) {
+                                  if (file is File &&
+                                      (file.path.endsWith(".aac") || file.path.endsWith(".wav")) &&
+                                      file.path.contains(baseName)) {
+                                    await file.delete();
+                                    print("🧽 Cleaned leftover file: ${file.path}");
+                                  }
+                                }
+
+                                setState(() {
+                                  isRecording = false;
+                                  titleController.clear();
+                                  filePath = null;
+                                  cleanedFilePath = null;
+                                });
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Recording discarded'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+
+                                Navigator.pop(context); // close sheet
+                              } catch (e) {
+                                print("⚠️ Error discarding files: $e");
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error deleting files: $e')),
+                                );
+                              }
+                            },
+                            child: const Text(
+                              'Discard',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          ),
+                        ],
                       ),
                   ],
                 ),
@@ -307,8 +290,6 @@ Future<void> wakeUpServer() async {
     },
   );
 }
-
-
 
 
 @override

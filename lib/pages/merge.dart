@@ -30,7 +30,7 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
 
 Future<void> wakeUpServer() async {
   try {
-    var response = await http.get(Uri.parse("https://etech-3a97.onrender.com/status"));
+    var response = await http.get(Uri.parse("https://etech-rgsx.onrender.com/status"));
     if (response.statusCode == 200) {
       print("✅ Server is active and ready to predict");
       ScaffoldMessenger.of(context).showMaterialBanner(
@@ -136,7 +136,7 @@ void initState() {
     try {
       var request = http.MultipartRequest(
   'POST', 
-  Uri.parse("https://etech-3a97.onrender.com/predict")
+  Uri.parse("https://etech-rgsx.onrender.com/predict")
 );
       request.files.add(await http.MultipartFile.fromPath('file', file.path));
       var response = await request.send();
