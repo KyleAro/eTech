@@ -147,6 +147,7 @@ void initState() {
       if (response.statusCode == 200) {
         var data = json.decode(respStr);
         String prediction = data['prediction'];
+        prediction = prediction[0].toUpperCase() + prediction.substring(1);
         double confidence = data['confidence'];
 
         // ✅ Upload audio to Firebase Storage
