@@ -21,6 +21,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # 🔥 HELPER: Probability Sharpening
 # -------------------------------
 def sharpen_probabilities(p, temp=0.35):
+    """Increase confidence by sharpening probabilities."""
     p = np.power(p, 1 / temp)
     p /= np.sum(p)
     return p
@@ -28,46 +29,44 @@ def sharpen_probabilities(p, temp=0.35):
 # -------------------------------
 # 🔥 HELPER: Detect Duckling Squeak Frames
 # -------------------------------
-def detect_squeak_frames(y, sr):
-    hop = 256
-    win = 512
-
+def detect_squeak_frames(y, sr, hop=256, win=512):
+    """Return a boolean mask for frames containing duckling squeaks."""
     energy = librosa.feature.rms(y=y, frame_length=win, hop_length=hop)[0]
     centroid = librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=hop)[0]
 
     energy_th = np.percentile(energy, 70)
-    freq_th = 3800  # duckling squeaks: ~4k–12k Hz
+    freq_th = 3800  # duckling squeaks are high-pitched
 
     valid = (energy > energy_th) & (centroid > freq_th)
     return valid
 
 # -------------------------------
-# 🔥 FEATURE EXTRACTION
+# 🔥 HELPER: Feature Extraction
 # -------------------------------
 def extract_squeak_features(file_path):
     y, sr = librosa.load(file_path, sr=None)
     y = librosa.util.normalize(y)
 
-    # Detect squeak frames
-    valid_frames = detect_squeak_frames(y, sr)
+    hop = 256  # frame hop consistent across features
+    valid_frames = detect_squeak_frames(y, sr, hop=hop)
     if not np.any(valid_frames):
-        return None  # No duckling squeak detected
+        return None
 
-    # --- MFCCs (13) ---
-    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+    # MFCCs (13) for squeaky frames
+    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13, hop_length=hop)
     squeak_mfcc = mfcc[:, valid_frames]
     mfcc_mean = np.mean(squeak_mfcc, axis=1)
 
-    # --- Spectral features ---
-    spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
-    spectral_rolloff = np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))
-    zero_crossing_rate = np.mean(librosa.feature.zero_crossing_rate(y))
+    # Spectral features
+    spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=hop))
+    spectral_rolloff = np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr, hop_length=hop))
+    zero_crossing_rate = np.mean(librosa.feature.zero_crossing_rate(y, hop_length=hop))
 
-    # --- Pitch ---
-    pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
+    # Pitch
+    pitches, magnitudes = librosa.piptrack(y=y, sr=sr, hop_length=hop)
     pitch = np.mean(pitches[pitches > 0]) if np.any(pitches > 0) else 0
 
-    # Combine into single feature vector (17 features total)
+    # Combine all 17 features
     features = np.hstack([mfcc_mean, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
     return features
 
@@ -98,7 +97,7 @@ def predict():
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     audio_file.save(filepath)
 
-    # Convert to WAV if necessary
+    # Convert to WAV if needed
     ext = filename.lower().split(".")[-1]
     if ext in ["m4a", "mp3"]:
         sound = AudioSegment.from_file(filepath, format=ext)
@@ -110,7 +109,7 @@ def predict():
     if features is None:
         return jsonify({"error": "No duckling squeak detected"}), 200
 
-    # Scale + Predict
+    # Scale + predict
     features_scaled = scaler.transform([features])
     raw_probs = model.predict_proba(features_scaled)[0]
     probs = sharpen_probabilities(raw_probs, temp=0.35)
@@ -125,6 +124,8 @@ def predict():
         "sharpened_probabilities": probs.tolist()
     })
 
-
+# -------------------------------
+# 🔥 RUN SERVER
+# -------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
