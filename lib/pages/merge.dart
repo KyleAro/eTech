@@ -74,7 +74,7 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
     bgColor = const Color(0xFFFF8A80); // pastel red
     textColor = Colors.white;
 
-    displayText = prediction; // already contains "Server Error: ..." from call
+    displayText = prediction; 
   }
 
   // 🔵 NORMAL MODE
@@ -115,7 +115,7 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
                  
                   if (isError) ...[
                     const Text(
-                      "Server Error",
+                      "An Error Occurred",
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 32,
