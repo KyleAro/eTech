@@ -1,13 +1,17 @@
+# --- INSTALL THESE FIRST ---
+# pip install flask librosa pydub numpy pandas scikit-learn joblib
+
 import os
 import numpy as np
-import librosa
+import pandas as pd
 from flask import Flask, request, jsonify
 import joblib
 from pydub import AudioSegment, silence
 from werkzeug.utils import secure_filename
-import base64
 import tempfile
+import base64
 import shutil
+from collections import Counter
 
 app = Flask(__name__)
 
@@ -16,9 +20,6 @@ app = Flask(__name__)
 # -------------------------------
 model = joblib.load("duckling_svm_rbf_day4-13.pkl")
 scaler = joblib.load("duckling_scaler_day4-13.pkl")
-
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # -------------------------------
 # 🔥 SETTINGS
@@ -103,7 +104,7 @@ def predict():
     audio_file.save(temp_path)
 
     try:
-        # Preprocess audio into clips
+        # Preprocess into clips
         clip_paths, temp_dir = preprocess_audio(temp_path)
         if not clip_paths:
             return jsonify({"error": "Audio too silent or too short"}), 400
@@ -121,12 +122,11 @@ def predict():
             confidences.append(conf)
 
         # Majority vote
-        from collections import Counter
         summary = Counter(predictions)
         majority_class = max(summary, key=summary.get)
         avg_conf = round(np.mean(confidences), 2)
 
-        # Encode first clip WAV for Flutter (optional)
+        # Encode first clip WAV as Base64 for Flutter
         with open(clip_paths[0], "rb") as f:
             wav_base64 = base64.b64encode(f.read()).decode("utf-8")
 
@@ -137,7 +137,6 @@ def predict():
         })
 
     finally:
-        # Cleanup
         if os.path.exists(temp_path):
             os.remove(temp_path)
         if os.path.exists(temp_dir):
