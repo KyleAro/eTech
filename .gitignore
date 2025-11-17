@@ -1,4 +1,6 @@
+# ----------------------------------------
 # Miscellaneous
+# ----------------------------------------
 *.class
 *.log
 *.pyc
@@ -12,18 +14,19 @@
 .swiftpm/
 migrate_working_dir/
 
-# IntelliJ related
+# ----------------------------------------
+# IDE / Editor
+# ----------------------------------------
 *.iml
 *.ipr
 *.iws
 .idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
+# VS Code folder (optional)
 #.vscode/
 
-# Flutter/Dart/Pub related
+# ----------------------------------------
+# Flutter / Dart / Pub
+# ----------------------------------------
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
@@ -31,17 +34,30 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
-/coverage/
-lib/firebase_options.dart 
+# Ignore generated Firebase options (optional, if you will fetch dynamically)
+lib/firebase_options.dart
+# Environment variables
 .env
 
-# Symbolication related
+# ----------------------------------------
+# Symbolication / Obfuscation
+# ----------------------------------------
 app.*.symbols
-
-# Obfuscation related
 app.*.map.json
 
-# Android Studio will place build artifacts here
+# ----------------------------------------
+# Android specific
+# ----------------------------------------
 /android/app/debug
 /android/app/profile
 /android/app/release
+# Firebase config files
+/android/app/google-services.json
+# Keystore files
+/android/app/*.jks
+/android/app/*.keystore
+
+# ----------------------------------------
+# iOS specific
+# ----------------------------------------
+/ios/Runner/GoogleService-Info.plist

@@ -131,15 +131,11 @@ class _FileManagementState extends State<FileManagement> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: backgroundColor,
-      appBar: AppBar(
-        title: const Text('File Management', style: TextStyle(color: Colors.white)),
-        backgroundColor: Colors.black,
-      ),
       body: isLoading
           ? const LoadingScreen(message: "Loading your audio files...")
           : RefreshIndicator(
   onRefresh: loadAudioFiles,
-  color: const Color.fromARGB(255, 209, 212, 10),
+  color:Color(0xFF2F4858),
   backgroundColor: Colors.black,
   child: LayoutBuilder(
     builder: (context, constraints) {
@@ -232,7 +228,7 @@ class AudioFileSlider extends StatelessWidget {
               min: 0,
               max: total,
               value: value,
-              activeColor: Colors.amber,
+              activeColor: secondColor,
               inactiveColor: const Color.fromARGB(104, 255, 255, 255),
               onChanged: (val) {
                 if (isCurrent) audioPlayer.seek(Duration(seconds: val.toInt()));

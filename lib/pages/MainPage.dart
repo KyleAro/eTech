@@ -7,6 +7,8 @@ import 'recordPage.dart';
 import 'merge.dart';
 
 const backgroundColor = Color.fromARGB(255, 240, 234, 159);
+const secondColor =Color(0xFFF7EC59);
+const textcolor = Color(0xFF0F6C7C);
 
 class Mainpage extends StatefulWidget {
   const Mainpage({super.key});
@@ -33,11 +35,11 @@ class _MainpageState extends State<Mainpage> {
       extendBodyBehindAppBar: true,
       backgroundColor: backgroundColor,
       appBar: AppBar(
-        backgroundColor: Color(0xFFF7EC59),
+        backgroundColor: secondColor,
         title: const Text(
           'eTech',
           style: TextStyle(
-            color: Colors.black,
+            color: textcolor,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -66,11 +68,11 @@ class _MainpageState extends State<Mainpage> {
         ),
       ),
       bottomNavigationBar: Container(
-        color: Color(0xFFF7EC59),
+        color: secondColor,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10),
           child: GNav(
-            backgroundColor: Color(0xFFF7EC59),
+            backgroundColor: secondColor,
             color: Colors.black,
             activeColor: Colors.white,
             tabBackgroundColor: const Color.fromARGB(255, 0, 0, 0),

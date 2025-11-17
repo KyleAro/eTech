@@ -92,9 +92,14 @@ flutter:
   assets:
     
     - assets/images/etikk.png
-
+    - assets/anim/loading.json
+    - assets/anim/confetti.json
+    - assets/anim/error.json
+    - assets/anim/girl.json
+    - assets/anim/boy.json
+    - assets/anim/loading2.json
 flutter_native_splash:
-  color: "#F0EA9F"
+  color: "#F0EA9F"  
   image: assets/images/etikk.png
   android: true
   ios: true

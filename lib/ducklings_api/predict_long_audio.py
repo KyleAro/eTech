@@ -11,11 +11,11 @@ from collections import Counter
 import shutil
 
 # === LOAD TRAINED MODEL & SCALER ===
-model = joblib.load("duckling_svm_rbf_day4-13.pkl")
-scaler = joblib.load("duckling_scaler_day4-13.pkl")
+model = joblib.load(r"C:\Users\User\OneDrive - Innobyte\Desktop\etech\duckling_svm_rbf_day4-13.pkl")
+scaler = joblib.load(r"C:\Users\User\OneDrive - Innobyte\Desktop\etech\duckling_scaler_day4-13.pkl")
 
 # === SETTINGS ===
-INPUT_FILE = "Raw datasets/Day11_girl/f5-11.m4a"  # <-- your file here
+INPUT_FILE = "Male-5-Day-12-mhknoi9s399gcc.mp3"  # <-- your file here
 TEMP_FOLDER = "temp_clips"
 OUTPUT_BASE = "predicted_dataset"   # final labeled dataset folder
 CLIP_LENGTH_MS = 3000
