@@ -124,13 +124,21 @@ def status():
 @app.route("/predict", methods=["POST"])
 def predict():
     audio_file = request.files.get("audio")
-    if not audio_file:
+    audio_base64 = request.json.get("audio_base64") if request.is_json else None
+
+
+    if not audio_file and not audio_base64:
         return jsonify({"error": "No audio file uploaded"}), 400
 
-    filename = secure_filename(audio_file.filename)
-    temp_path = os.path.join(tempfile.gettempdir(), filename)
-    audio_file.save(temp_path)
-
+    if audio_file:
+        filename = secure_filename(audio_file.filename)
+        temp_path = os.path.join(tempfile.gettempdir(), filename)
+        audio_file.save(temp_path)
+    else:
+        filename = "recorded.wav"
+        temp_path = os.path.join(tempfile.gettempdir(), filename)
+        with open(temp_path, "wb") as f:
+            f.write(base64.b64decode(audio_base64))
     try:
         # 1️⃣ Try squeak detection first
         features = extract_squeak_features(temp_path)
