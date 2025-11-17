@@ -1,14 +1,20 @@
 # --- INSTALL THESE FIRST ---
-# pip install flask librosa pydub numpy scikit-learn joblib
+# pip install flask librosa pydub numpy pandas scikit-learn joblib
 
 import os
-import numpy as np
-from flask import Flask, request, jsonify
-import joblib
-from pydub import AudioSegment
-from werkzeug.utils import secure_filename
 import tempfile
+import shutil
 import base64
+from collections import Counter
+
+from flask import Flask, request, jsonify
+from werkzeug.utils import secure_filename
+from pydub import AudioSegment, silence
+
+import numpy as np
+import pandas as pd
+import librosa
+import joblib
 
 app = Flask(__name__)
 
@@ -19,41 +25,61 @@ model = joblib.load("duckling_svm_rbf_day4-13.pkl")
 scaler = joblib.load("duckling_scaler_day4-13.pkl")
 
 # -------------------------------
-# 🔥 HELPER FUNCTIONS
+# 🔥 SETTINGS
 # -------------------------------
-def sharpen_probabilities(p, temp=0.35):
-    p = np.power(p, 1 / temp)
-    p /= np.sum(p)
-    return p
+CLIP_LENGTH_MS = 3000
+MIN_SILENCE_LEN = 500
+SILENCE_THRESH = -45
 
-def detect_squeak_frames(y, sr, hop=256, win=512):
-    energy = librosa.feature.rms(y=y, frame_length=win, hop_length=hop)[0]
-    centroid = librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=hop)[0]
-    energy_th = np.percentile(energy, 70)
-    freq_th = 3800  # Hz threshold for high-pitched squeaks
-    valid = (energy > energy_th) & (centroid > freq_th)
-    return valid
-
-def extract_features_from_squeaks(file_path):
+# -------------------------------
+# 🔥 FEATURE EXTRACTION
+# -------------------------------
+def extract_features(file_path):
     y, sr = librosa.load(file_path, sr=None)
     y = librosa.util.normalize(y)
-    hop = 256
-    valid_frames = detect_squeak_frames(y, sr, hop=hop)
-    if not np.any(valid_frames):
-        return None  # no squeak detected
 
-    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13, hop_length=hop)
-    squeak_mfcc = mfcc[:, valid_frames]
-    mfcc_mean = np.mean(squeak_mfcc, axis=1)
-
-    spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=hop))
-    spectral_rolloff = np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr, hop_length=hop))
-    zero_crossing_rate = np.mean(librosa.feature.zero_crossing_rate(y, hop_length=hop))
-    pitches, magnitudes = librosa.piptrack(y=y, sr=sr, hop_length=hop)
+    mfccs = np.mean(librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13).T, axis=0)
+    spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
+    spectral_rolloff = np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))
+    zero_crossing_rate = np.mean(librosa.feature.zero_crossing_rate(y))
+    pitches, _ = librosa.piptrack(y=y, sr=sr)
     pitch = np.mean(pitches[pitches > 0]) if np.any(pitches > 0) else 0
 
-    features = np.hstack([mfcc_mean, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
-    return features
+    return np.hstack([mfccs, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
+
+# -------------------------------
+# 🔥 AUDIO PREPROCESSING
+# -------------------------------
+def preprocess_audio(file_path):
+    # Convert to WAV if needed
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in [".mp3", ".m4a", ".aac"]:
+        audio_temp = AudioSegment.from_file(file_path, format=ext.replace('.', ''))
+        wav_path = file_path.rsplit(".", 1)[0] + ".wav"
+        audio_temp.export(wav_path, format="wav")
+        file_path = wav_path
+
+    audio = AudioSegment.from_file(file_path)
+    chunks = silence.split_on_silence(
+        audio,
+        min_silence_len=MIN_SILENCE_LEN,
+        silence_thresh=SILENCE_THRESH
+    )
+
+    combined = AudioSegment.empty()
+    for c in chunks:
+        combined += c + AudioSegment.silent(duration=100)
+
+    clip_paths = []
+    temp_dir = tempfile.mkdtemp()
+    for i, start in enumerate(range(0, len(combined), CLIP_LENGTH_MS)):
+        clip = combined[start:start + CLIP_LENGTH_MS]
+        if len(clip) > 1000:
+            clip_name = os.path.join(temp_dir, f"clip_{i+1}.wav")
+            clip.export(clip_name, format="wav")
+            clip_paths.append(clip_name)
+
+    return clip_paths, temp_dir
 
 # -------------------------------
 # 🔥 STATUS ENDPOINT
@@ -80,40 +106,45 @@ def predict():
     temp_path = os.path.join(tempfile.gettempdir(), filename)
     audio_file.save(temp_path)
 
-    # Convert to WAV if needed
-    ext = filename.split('.')[-1].lower()
-    if ext in ["mp3", "m4a", "aac"]:
-        sound = AudioSegment.from_file(temp_path, format=ext)
-        wav_path = temp_path.rsplit(".", 1)[0] + ".wav"
-        sound.export(wav_path, format="wav")
-        os.remove(temp_path)
-        temp_path = wav_path
-
     try:
-        features = extract_features_from_squeaks(temp_path)
-        if features is None:
-            return jsonify({"error": "No duckling squeak detected"}), 200
+        # Preprocess into clips
+        clip_paths, temp_dir = preprocess_audio(temp_path)
+        if not clip_paths:
+            return jsonify({"error": "Audio too silent or too short"}), 400
 
-        features_scaled = scaler.transform([features])
-        raw_probs = model.predict_proba(features_scaled)[0]
-        probs = sharpen_probabilities(raw_probs)
+        predictions = []
+        confidences = []
 
-        pred = model.classes_[np.argmax(probs)]
-        conf = float(np.max(probs) * 100)
+        # Predict each clip
+        for clip_path in clip_paths:
+            features = extract_features(clip_path).reshape(1, -1)
+            features_scaled = scaler.transform(features)
+            prob = model.predict_proba(features_scaled)[0]
+            pred = model.classes_[np.argmax(prob)]
+            conf = float(np.max(prob) * 100)
+            predictions.append(pred)
+            confidences.append(conf)
 
-        # Encode WAV as Base64 for Flutter
-        with open(temp_path, "rb") as f:
+        # Majority vote
+        summary = Counter(predictions)
+        majority_class = max(summary, key=summary.get)
+        avg_conf = round(np.mean(confidences), 2)
+
+        # Encode first clip WAV as Base64
+        with open(clip_paths[0], "rb") as f:
             wav_base64 = base64.b64encode(f.read()).decode("utf-8")
 
         return jsonify({
-            "prediction": pred,
-            "confidence": round(conf, 2),
+            "prediction": majority_class,
+            "confidence": avg_conf,
             "wav_base64": wav_base64
         })
 
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
 
 # -------------------------------
 # 🔥 RUN SERVER
