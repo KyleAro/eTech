@@ -1,30 +1,40 @@
 # --- INSTALL THESE FIRST ---
-# pip install librosa pydub numpy pandas scikit-learn joblib
+# pip install flask librosa pydub numpy pandas scikit-learn joblib
 
-import os
+from flask import Flask, request, jsonify
 from pydub import AudioSegment, silence
 import numpy as np
 import pandas as pd
 import librosa
 import joblib
 from collections import Counter
-import shutil
-import tempfile
-
-# === LOAD TRAINED MODEL & SCALER ===
-model = joblib.load("duckling_svm_rbf_day4-13.pkl")
-scaler = joblib.load("duckling_scaler_day4-13.pkl")
+import io
+import threading
 
 # === SETTINGS ===
-TEMP_FOLDER = "temp_clips"
-OUTPUT_BASE = "predicted_dataset"   # final labeled dataset folder
 CLIP_LENGTH_MS = 3000
 MIN_SILENCE_LEN = 500
 SILENCE_THRESH = -45
 
+# === LOAD MODEL & SCALER (WARM-UP) ===
+model = None
+scaler = None
+server_ready = False
+
+def warm_up():
+    global model, scaler, server_ready
+    print("Warming up server...")
+    model = joblib.load("duckling_svm_rbf_day4-13.pkl")
+    scaler = joblib.load("duckling_scaler_day4-13.pkl")
+    server_ready = True
+    print("Server ready!")
+
+# Start warm-up in a separate thread so Render responds immediately
+threading.Thread(target=warm_up).start()
+
 # === FEATURE EXTRACTION ===
-def extract_features(file_path):
-    y, sr = librosa.load(file_path, sr=None)
+def extract_features(audio_bytes):
+    y, sr = librosa.load(io.BytesIO(audio_bytes), sr=None)
     y = librosa.util.normalize(y)
 
     mfccs = np.mean(librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13).T, axis=0)
@@ -36,51 +46,32 @@ def extract_features(file_path):
 
     return np.hstack([mfccs, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
 
-# === STEP 1: CLEAN AUDIO & SPLIT INTO CLIPS ===
-def preprocess_audio(file_path):
-    os.makedirs(TEMP_FOLDER, exist_ok=True)
-
-    # Auto-convert .mp3 / .m4a → .wav
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext in [".mp3", ".m4a"]:
-        audio_temp = AudioSegment.from_file(file_path, format=ext.replace('.', ''))
-        temp_wav_path = os.path.join(TEMP_FOLDER, "converted_temp.wav")
-        audio_temp.export(temp_wav_path, format="wav")
-        file_path = temp_wav_path
-
-    audio = AudioSegment.from_file(file_path)
-    chunks = silence.split_on_silence(
-        audio,
-        min_silence_len=MIN_SILENCE_LEN,
-        silence_thresh=SILENCE_THRESH
-    )
+# === SPLIT AUDIO ON SILENCE & CLIP ===
+def split_audio(file_bytes):
+    audio = AudioSegment.from_file(io.BytesIO(file_bytes))
+    chunks = silence.split_on_silence(audio, min_silence_len=MIN_SILENCE_LEN, silence_thresh=SILENCE_THRESH)
 
     combined = AudioSegment.empty()
     for c in chunks:
         combined += c + AudioSegment.silent(duration=100)
 
-    clip_paths = []
-    for i, start in enumerate(range(0, len(combined), CLIP_LENGTH_MS)):
+    clips = []
+    for start in range(0, len(combined), CLIP_LENGTH_MS):
         clip = combined[start:start + CLIP_LENGTH_MS]
         if len(clip) > 1000:
-            clip_name = os.path.join(TEMP_FOLDER, f"clip_{i+1}.wav")
-            clip.export(clip_name, format="wav")
-            clip_paths.append(clip_name)
+            buf = io.BytesIO()
+            clip.export(buf, format="wav")
+            clips.append(buf.getvalue())
+    return clips
 
-    return clip_paths
-
-# === STEP 2: PREDICT & ORGANIZE ===
-def predict_and_organize(clip_paths):
+# === PREDICT ===
+def predict_clips(clips):
     cols = [f"mfcc{i+1}" for i in range(13)] + ["spectral_centroid", "spectral_rolloff", "zero_crossing_rate", "pitch"]
-
-    os.makedirs(os.path.join(OUTPUT_BASE, "male"), exist_ok=True)
-    os.makedirs(os.path.join(OUTPUT_BASE, "female"), exist_ok=True)
-
     predictions = []
     confidences = []
 
-    for i, path in enumerate(clip_paths):
-        features = extract_features(path).reshape(1, -1)
+    for clip_bytes in clips:
+        features = extract_features(clip_bytes).reshape(1, -1)
         features_df = pd.DataFrame(features, columns=cols)
         features_scaled = scaler.transform(features_df)
 
@@ -88,33 +79,45 @@ def predict_and_organize(clip_paths):
         pred = model.classes_[np.argmax(prob)]
         conf = round(max(prob) * 100, 2)
 
-        # Move and rename
-        dest_folder = os.path.join(OUTPUT_BASE, pred)
-        new_name = f"{pred}_clip_{i+1}.wav"
-        dest_path = os.path.join(dest_folder, new_name)
-        shutil.move(path, dest_path)
-
         predictions.append(pred)
         confidences.append(conf)
 
+    if not predictions:
+        return None, None
+
     summary = Counter(predictions)
-    total = len(predictions)
+    majority_pred = max(summary, key=summary.get)
     avg_conf = round(np.mean(confidences), 2)
-    majority = max(summary, key=summary.get)
 
-    return {
-        "total_clips": total,
-        "male_clips": summary.get("male", 0),
-        "female_clips": summary.get("female", 0),
-        "average_confidence": avg_conf,
-        "majority_prediction": majority
-    }
+    return majority_pred, avg_conf
 
-# === MAIN FUNCTION TO CALL WITH UPLOADED FILE ===
-def process_uploaded_file(file_path):
-    clips = preprocess_audio(file_path)
-    if len(clips) == 0:
-        return {"error": "Audio too short or silent"}
-    results = predict_and_organize(clips)
-    return results
+# === FLASK APP ===
+app = Flask(__name__)
 
+@app.route("/predict", methods=["POST"])
+def predict():
+    if not server_ready:
+        return jsonify({"status": "error", "message": "Server warming up, try again in a few seconds"}), 503
+
+    if "file" not in request.files:
+        return jsonify({"status": "error", "message": "No file uploaded"}), 400
+
+    file_bytes = request.files["file"].read()
+    clips = split_audio(file_bytes)
+
+    if not clips:
+        return jsonify({"status": "error", "message": "Audio too short or silent"}), 400
+
+    prediction, confidence = predict_clips(clips)
+    if prediction is None:
+        return jsonify({"status": "error", "message": "Could not make prediction"}), 500
+
+    return jsonify({"status": "success", "prediction": prediction, "confidence": confidence})
+
+# === SERVER STATUS ENDPOINT ===
+@app.route("/status", methods=["GET"])
+def status():
+    return jsonify({"status": "ready" if server_ready else "warming_up"})
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8000)
