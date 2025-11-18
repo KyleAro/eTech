@@ -202,13 +202,6 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
     );
   }
 
-  Future<File> convertMp3ToWav(File mp3File) async {
-    final dir = await getTemporaryDirectory();
-    String wavPath = '${dir.path}/${mp3File.uri.pathSegments.last.split(".").first}.wav';
-    String cmd = '-i "${mp3File.path}" -ar 16000 -ac 1 -t 10 "$wavPath"';
-    await FFmpegKit.execute(cmd);
-    return File(wavPath);
-  }
 
   Future<void> _pickAndSendFile() async {
   // Pick audio file
@@ -233,10 +226,6 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
     return;
   }
 
-  // Convert MP3 to WAV if needed
-  if (file.path.toLowerCase().endsWith(".mp3")) {
-    file = await convertMp3ToWav(file);
-  }
 
   setState(() {
     loading = true;

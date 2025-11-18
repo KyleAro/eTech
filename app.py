@@ -1,29 +1,40 @@
+# --- INSTALL THESE FIRST ---
+# pip install flask librosa pydub numpy pandas scikit-learn joblib
+
 from flask import Flask, request, jsonify
-import os
-import librosa
+from pydub import AudioSegment, silence
 import numpy as np
 import pandas as pd
-from pydub import AudioSegment, silence
+import librosa
 import joblib
 from collections import Counter
-import tempfile
-import shutil
-
-# === LOAD MODEL & SCALER ===
-model = joblib.load("duckling_svm_rbf_day4-13.pkl")
-scaler = joblib.load("duckling_scaler_day4-13.pkl")
+import io
+import threading
 
 # === SETTINGS ===
 CLIP_LENGTH_MS = 3000
 MIN_SILENCE_LEN = 500
 SILENCE_THRESH = -45
 
-app = Flask(__name__)
+# === LOAD MODEL & SCALER (WARM-UP) ===
+model = None
+scaler = None
+server_ready = False
 
+def warm_up():
+    global model, scaler, server_ready
+    print("Warming up server...")
+    model = joblib.load("duckling_svm_rbf_day4-13.pkl")
+    scaler = joblib.load("duckling_scaler_day4-13.pkl")
+    server_ready = True
+    print("Server ready!")
+
+# Start warm-up in a separate thread so Render responds immediately
+threading.Thread(target=warm_up).start()
 
 # === FEATURE EXTRACTION ===
-def extract_features(file_path):
-    y, sr = librosa.load(file_path, sr=None)
+def extract_features(audio_bytes):
+    y, sr = librosa.load(io.BytesIO(audio_bytes), sr=None)
     y = librosa.util.normalize(y)
 
     mfccs = np.mean(librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13).T, axis=0)
@@ -35,107 +46,78 @@ def extract_features(file_path):
 
     return np.hstack([mfccs, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
 
-
-# === PROCESS AUDIO (convert mp3 → wav + remove silence + split) ===
-def preprocess_audio(file_path):
-    temp_dir = tempfile.mkdtemp()
-
-    # 🔥 AUTO-CONVERT MP3 / M4A → WAV
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext in [".mp3", ".m4a"]:
-        audio_temp = AudioSegment.from_file(file_path, format=ext.replace(".", ""))
-        temp_wav_path = os.path.join(temp_dir, "converted.wav")
-        audio_temp.export(temp_wav_path, format="wav")
-        file_path = temp_wav_path
-
-    # Load (now guaranteed WAV)
-    audio = AudioSegment.from_file(file_path)
-
-    # Silence removal
-    chunks = silence.split_on_silence(
-        audio,
-        min_silence_len=MIN_SILENCE_LEN,
-        silence_thresh=SILENCE_THRESH
-    )
+# === SPLIT AUDIO ON SILENCE & CLIP ===
+def split_audio(file_bytes):
+    audio = AudioSegment.from_file(io.BytesIO(file_bytes))
+    chunks = silence.split_on_silence(audio, min_silence_len=MIN_SILENCE_LEN, silence_thresh=SILENCE_THRESH)
 
     combined = AudioSegment.empty()
     for c in chunks:
         combined += c + AudioSegment.silent(duration=100)
 
-    # Clip into 3s segments
-    clip_paths = []
-    for i, start in enumerate(range(0, len(combined), CLIP_LENGTH_MS)):
+    clips = []
+    for start in range(0, len(combined), CLIP_LENGTH_MS):
         clip = combined[start:start + CLIP_LENGTH_MS]
         if len(clip) > 1000:
-            clip_path = os.path.join(temp_dir, f"clip_{i+1}.wav")
-            clip.export(clip_path, format="wav")
-            clip_paths.append(clip_path)
+            buf = io.BytesIO()
+            clip.export(buf, format="wav")
+            clips.append(buf.getvalue())
+    return clips
 
-    return clip_paths, temp_dir
+# === PREDICT ===
+def predict_clips(clips):
+    cols = [f"mfcc{i+1}" for i in range(13)] + ["spectral_centroid", "spectral_rolloff", "zero_crossing_rate", "pitch"]
+    predictions = []
+    confidences = []
 
+    for clip_bytes in clips:
+        features = extract_features(clip_bytes).reshape(1, -1)
+        features_df = pd.DataFrame(features, columns=cols)
+        features_scaled = scaler.transform(features_df)
+
+        prob = model.predict_proba(features_scaled)[0]
+        pred = model.classes_[np.argmax(prob)]
+        conf = round(max(prob) * 100, 2)
+
+        predictions.append(pred)
+        confidences.append(conf)
+
+    if not predictions:
+        return None, None
+
+    summary = Counter(predictions)
+    majority_pred = max(summary, key=summary.get)
+    avg_conf = round(np.mean(confidences), 2)
+
+    return majority_pred, avg_conf
+
+# === FLASK APP ===
+app = Flask(__name__)
 
 @app.route("/predict", methods=["POST"])
 def predict():
+    if not server_ready:
+        return jsonify({"status": "error", "message": "Server warming up, try again in a few seconds"}), 503
+
     if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+        return jsonify({"status": "error", "message": "No file uploaded"}), 400
 
-    uploaded_file = request.files["file"]
+    file_bytes = request.files["file"].read()
+    clips = split_audio(file_bytes)
 
-    temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-    uploaded_file.save(temp_input.name)
+    if not clips:
+        return jsonify({"status": "error", "message": "Audio too short or silent"}), 400
 
-    try:
-        # Preprocess audio
-        clips, temp_dir = preprocess_audio(temp_input.name)
-        if len(clips) == 0:
-            return jsonify({"error": "No valid audio found"}), 400
+    prediction, confidence = predict_clips(clips)
+    if prediction is None:
+        return jsonify({"status": "error", "message": "Could not make prediction"}), 500
 
-        cols = [f"mfcc{i+1}" for i in range(13)] + \
-               ["spectral_centroid", "spectral_rolloff", "zero_crossing_rate", "pitch"]
+    return jsonify({"status": "success", "prediction": prediction, "confidence": confidence})
 
-        predictions = []
-        confidences = []
-
-        # Predict each clip
-        for clip_path in clips:
-            features = extract_features(clip_path).reshape(1, -1)
-            df = pd.DataFrame(features, columns=cols)
-            scaled = scaler.transform(df)
-
-            prob = model.predict_proba(scaled)[0]
-            pred = model.classes_[np.argmax(prob)]
-            conf = float(np.max(prob)) * 100
-
-            predictions.append(pred)
-            confidences.append(conf)
-
-        summary = Counter(predictions)
-        final_prediction = max(summary, key=summary.get)
-        final_confidence = float(np.mean(confidences))
-
-        return jsonify({
-            "prediction": final_prediction,
-            "confidence": final_confidence
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    finally:
-        try:
-            shutil.rmtree(temp_dir)
-        except:
-            pass
-        try:
-            os.remove(temp_input.name)
-        except:
-            pass
-
-
-@app.route("/", methods=["GET"])
-def home():
-    return "Duckling Gender Classifier API is running."
-
+# === SERVER STATUS ENDPOINT ===
+@app.route("/status", methods=["GET"])
+def status():
+    return jsonify({"status": "ready" if server_ready else "warming_up"})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=8000)
