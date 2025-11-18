@@ -118,9 +118,3 @@ def process_uploaded_file(file_path):
     results = predict_and_organize(clips)
     return results
 
-# Example usage for testing:
-if __name__ == "__main__":
-    import sys
-    test_file = sys.argv[1] if len(sys.argv) > 1 else "Raw datasets/Day11_girl/f5-11.m4a"
-    results = process_uploaded_file(test_file)
-    print(results)
