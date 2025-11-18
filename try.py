@@ -12,8 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydub import AudioSegment, silence
 
 # === LOAD MODEL & SCALER ===
-model = joblib.load(r"C:\Users\User\OneDrive - Innobyte\Desktop\etech\duckling_svm_rbf_day4-13.pkl")
-scaler = joblib.load(r"C:\Users\User\OneDrive - Innobyte\Desktop\etech\duckling_scaler_day4-13.pkl")
+model = joblib.load("duckling_svm_rbf_day4-13.pkl")
+scaler = joblib.load("duckling_scaler_day4-13.pkl")
 
 # === SETTINGS ===
 CLIP_LENGTH_MS = 3000
