@@ -47,23 +47,19 @@ def extract_features(audio_bytes):
     return np.hstack([mfccs, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
 
 # === SPLIT AUDIO ON SILENCE & CLIP ===
-def split_audio(file_bytes):
+def split_audio_fixed(file_bytes, clip_length_ms=CLIP_LENGTH_MS, overlap_ms=OVERLAP_MS):
     audio = AudioSegment.from_file(io.BytesIO(file_bytes))
-    chunks = silence.split_on_silence(audio, min_silence_len=MIN_SILENCE_LEN, silence_thresh=SILENCE_THRESH)
-
-    combined = AudioSegment.empty()
-    for c in chunks:
-        combined += c + AudioSegment.silent(duration=100)
-
     clips = []
-    for start in range(0, len(combined), CLIP_LENGTH_MS):
-        clip = combined[start:start + CLIP_LENGTH_MS]
-        if len(clip) > 1000:
+
+    step = clip_length_ms - overlap_ms
+    for start in range(0, len(audio), step):
+        clip = audio[start:start + clip_length_ms]
+        if len(clip) > 500:  # keep very short segments
             buf = io.BytesIO()
             clip.export(buf, format="wav")
             clips.append(buf.getvalue())
-    return clips
 
+    return clips
 # === PREDICT ===
 def predict_clips(clips):
     cols = [f"mfcc{i+1}" for i in range(13)] + ["spectral_centroid", "spectral_rolloff", "zero_crossing_rate", "pitch"]
@@ -103,7 +99,7 @@ def predict():
         return jsonify({"status": "error", "message": "No file uploaded"}), 400
 
     file_bytes = request.files["file"].read()
-    clips = split_audio(file_bytes)
+    clips = split_audio_fixed(file_bytes)
 
     if not clips:
         return jsonify({"status": "error", "message": "Audio too short or silent"}), 400

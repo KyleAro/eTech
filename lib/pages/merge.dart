@@ -211,67 +211,81 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
   }
 
   Future<void> _pickAndSendFile() async {
-    FilePickerResult? resultPicker = await FilePicker.platform.pickFiles(type: FileType.audio);
-    if (resultPicker == null) return;
+  // Pick audio file
+  FilePickerResult? resultPicker =
+      await FilePicker.platform.pickFiles(type: FileType.audio);
 
-    File file = File(resultPicker.files.single.path!);
+  if (resultPicker == null) return; // user canceled
 
-    if (file.path.toLowerCase().endsWith(".mp3")) {
-      file = await convertMp3ToWav(file);
-    }
+  File? file;
+  final pickedFile = resultPicker.files.single;
 
-    setState(() => loading = true);
+  // Safely handle file path or bytes
+  if (pickedFile.path != null) {
+    file = File(pickedFile.path!);
+  } else if (pickedFile.bytes != null) {
+    final dir = await getTemporaryDirectory();
+    final tempFile = File('${dir.path}/${pickedFile.name}');
+    await tempFile.writeAsBytes(pickedFile.bytes!);
+    file = tempFile;
+  } else {
+    _showResultBottomSheet("Invalid file selected", 0.0, isError: true);
+    return;
+  }
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const LoadingScreen(
-        animationAsset: 'assets/anim/loading2.json',
-        message: "Analyzing audio...",
-        backgroundColor: secondColor,
-        textColor: textcolor,
-      ),
+  // Convert MP3 to WAV if needed
+  if (file.path.toLowerCase().endsWith(".mp3")) {
+    file = await convertMp3ToWav(file);
+  }
+
+  setState(() {
+    loading = true;
+  });
+
+  // Show loader
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const LoadingScreen(
+      animationAsset: 'assets/anim/loading2.json',
+      message: "Analyzing audio...",
+      backgroundColor: secondColor,
+      textColor: textcolor,
+    ),
+  );
+
+  try {
+    var request = http.MultipartRequest(
+      'POST',
+      Uri.parse("https://etech-rgsx.onrender.com/predict"),
     );
 
-    try {
-      var request = http.MultipartRequest('POST', Uri.parse("https://etech-rgsx.onrender.com/predict"));
-      request.files.add(await http.MultipartFile.fromPath('file', file.path));
-      var response = await request.send();
-      var respStr = await response.stream.bytesToString();
+    request.files.add(await http.MultipartFile.fromPath('file', file.path));
+    var response = await request.send();
+    var respStr = await response.stream.bytesToString();
 
-      if (response.statusCode == 200) {
-        var data = json.decode(respStr);
-        String prediction = data['prediction'];
-        prediction = prediction[0].toUpperCase() + prediction.substring(1);
-        double confidence = data['confidence'];
+    if (response.statusCode == 200) {
+      var data = json.decode(respStr);
+      String prediction = data['prediction'];
+      prediction = prediction[0].toUpperCase() + prediction.substring(1);
+      double confidence = data['confidence'];
 
-        Uint8List wavBytes = base64Decode(data['wav_base64']);
-        String originalName = file.path.split('/').last.split('.').first;
-        String fileName = "${prediction}_$originalName.wav";
-
-        String downloadUrl = await _storageService.uploadBytes(wavBytes, fileName, prediction);
-
-        await _firestoreService.savePrediction(
-          prediction: prediction,
-          confidence: confidence,
-          downloadUrl: downloadUrl,
-          filePath: file.path,
-        );
-
-        Navigator.pop(context);
-        setState(() => showConfetti = true);
-        _showResultBottomSheet(prediction, confidence);
-      } else {
-        Navigator.pop(context);
-        _showResultBottomSheet("Server Error", 0.0, isError: true);
-      }
-    } catch (e) {
+      Navigator.pop(context); // close loader
+      _showResultBottomSheet(prediction, confidence);
+    } else {
       Navigator.pop(context);
-      _showResultBottomSheet("Error: $e", 0.0, isError: true);
-    } finally {
-      setState(() => loading = false);
+      _showResultBottomSheet("Server Error", 0.0, isError: true);
     }
+  } catch (e) {
+    Navigator.pop(context);
+    _showResultBottomSheet("Error: $e", 0.0, isError: true);
+  } finally {
+    setState(() {
+      loading = false;
+    });
   }
+}
+
 
   @override
   Widget build(BuildContext context) {
