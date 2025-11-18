@@ -2,35 +2,21 @@
 # pip install flask librosa pydub numpy pandas scikit-learn joblib
 
 from flask import Flask, request, jsonify
-from pydub import AudioSegment, silence
+from pydub import AudioSegment
 import numpy as np
 import pandas as pd
 import librosa
 import joblib
 from collections import Counter
 import io
-import threading
+
+# === LOAD MODEL & SCALER ===
+model = joblib.load("duckling_svm_rbf_day4-13.pkl")
+scaler = joblib.load("duckling_scaler_day4-13.pkl")
 
 # === SETTINGS ===
-CLIP_LENGTH_MS = 3000
-MIN_SILENCE_LEN = 500
-SILENCE_THRESH = -45
-
-# === LOAD MODEL & SCALER (WARM-UP) ===
-model = None
-scaler = None
-server_ready = False
-
-def warm_up():
-    global model, scaler, server_ready
-    print("Warming up server...")
-    model = joblib.load("duckling_svm_rbf_day4-13.pkl")
-    scaler = joblib.load("duckling_scaler_day4-13.pkl")
-    server_ready = True
-    print("Server ready!")
-
-# Start warm-up in a separate thread so Render responds immediately
-threading.Thread(target=warm_up).start()
+CLIP_LENGTH_MS = 3000       # 3-second clips
+OVERLAP_MS = 1500           # 50% overlap for long audio
 
 # === FEATURE EXTRACTION ===
 def extract_features(audio_bytes):
@@ -46,7 +32,7 @@ def extract_features(audio_bytes):
 
     return np.hstack([mfccs, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
 
-# === SPLIT AUDIO ON SILENCE & CLIP ===
+# === SPLIT AUDIO INTO FIXED CLIPS WITH OVERLAP ===
 def split_audio_fixed(file_bytes, clip_length_ms=CLIP_LENGTH_MS, overlap_ms=OVERLAP_MS):
     audio = AudioSegment.from_file(io.BytesIO(file_bytes))
     clips = []
@@ -60,6 +46,7 @@ def split_audio_fixed(file_bytes, clip_length_ms=CLIP_LENGTH_MS, overlap_ms=OVER
             clips.append(buf.getvalue())
 
     return clips
+
 # === PREDICT ===
 def predict_clips(clips):
     cols = [f"mfcc{i+1}" for i in range(13)] + ["spectral_centroid", "spectral_rolloff", "zero_crossing_rate", "pitch"]
@@ -81,6 +68,7 @@ def predict_clips(clips):
     if not predictions:
         return None, None
 
+    # Majority vote for final prediction
     summary = Counter(predictions)
     majority_pred = max(summary, key=summary.get)
     avg_conf = round(np.mean(confidences), 2)
@@ -90,30 +78,28 @@ def predict_clips(clips):
 # === FLASK APP ===
 app = Flask(__name__)
 
+@app.route("/status", methods=["GET"])
+def status():
+    # simple endpoint to check server readiness
+    return jsonify({"status": "ready"}), 200
+
 @app.route("/predict", methods=["POST"])
 def predict():
-    if not server_ready:
-        return jsonify({"status": "error", "message": "Server warming up, try again in a few seconds"}), 503
-
     if "file" not in request.files:
-        return jsonify({"status": "error", "message": "No file uploaded"}), 400
+        return jsonify({"error": "No file uploaded"}), 400
 
     file_bytes = request.files["file"].read()
     clips = split_audio_fixed(file_bytes)
 
     if not clips:
-        return jsonify({"status": "error", "message": "Audio too short or silent"}), 400
+        return jsonify({"error": "Audio too short or empty"}), 400
 
     prediction, confidence = predict_clips(clips)
     if prediction is None:
-        return jsonify({"status": "error", "message": "Could not make prediction"}), 500
+        return jsonify({"error": "Could not make prediction"}), 500
 
-    return jsonify({"status": "success", "prediction": prediction, "confidence": confidence})
-
-# === SERVER STATUS ENDPOINT ===
-@app.route("/status", methods=["GET"])
-def status():
-    return jsonify({"status": "ready" if server_ready else "warming_up"})
+    return jsonify({"prediction": prediction, "confidence": confidence}), 200
 
 if __name__ == "__main__":
+    print("✅ Server is starting and ready to receive requests...")
     app.run(host="0.0.0.0", port=8000)
