@@ -36,11 +36,22 @@ def extract_features(file_path):
     return np.hstack([mfccs, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
 
 
-# === PROCESS AUDIO (remove silence + split) ===
+# === PROCESS AUDIO (convert mp3 → wav + remove silence + split) ===
 def preprocess_audio(file_path):
     temp_dir = tempfile.mkdtemp()
+
+    # 🔥 AUTO-CONVERT MP3 / M4A → WAV
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in [".mp3", ".m4a"]:
+        audio_temp = AudioSegment.from_file(file_path, format=ext.replace(".", ""))
+        temp_wav_path = os.path.join(temp_dir, "converted.wav")
+        audio_temp.export(temp_wav_path, format="wav")
+        file_path = temp_wav_path
+
+    # Load (now guaranteed WAV)
     audio = AudioSegment.from_file(file_path)
 
+    # Silence removal
     chunks = silence.split_on_silence(
         audio,
         min_silence_len=MIN_SILENCE_LEN,
@@ -51,6 +62,7 @@ def preprocess_audio(file_path):
     for c in chunks:
         combined += c + AudioSegment.silent(duration=100)
 
+    # Clip into 3s segments
     clip_paths = []
     for i, start in enumerate(range(0, len(combined), CLIP_LENGTH_MS)):
         clip = combined[start:start + CLIP_LENGTH_MS]
@@ -69,12 +81,11 @@ def predict():
 
     uploaded_file = request.files["file"]
 
-    # ⬇️ Save temp input file
     temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
     uploaded_file.save(temp_input.name)
 
     try:
-        # 1️⃣ Preprocess + segment audio
+        # Preprocess audio
         clips, temp_dir = preprocess_audio(temp_input.name)
         if len(clips) == 0:
             return jsonify({"error": "No valid audio found"}), 400
@@ -85,7 +96,7 @@ def predict():
         predictions = []
         confidences = []
 
-        # 2️⃣ Predict all clips
+        # Predict each clip
         for clip_path in clips:
             features = extract_features(clip_path).reshape(1, -1)
             df = pd.DataFrame(features, columns=cols)
@@ -98,7 +109,6 @@ def predict():
             predictions.append(pred)
             confidences.append(conf)
 
-        # 3️⃣ Final Result (Majority Vote)
         summary = Counter(predictions)
         final_prediction = max(summary, key=summary.get)
         final_confidence = float(np.mean(confidences))
