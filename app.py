@@ -1,58 +1,28 @@
-# ===========================
-#  CLEAN & CORRECTED API.PY
-# ===========================
+# --- INSTALL THESE FIRST ---
+# pip install librosa pydub numpy pandas scikit-learn joblib
 
 import os
-import tempfile
-import base64
+from pydub import AudioSegment, silence
 import numpy as np
 import pandas as pd
 import librosa
 import joblib
-from flask import Flask, request, jsonify
-from pydub import AudioSegment, silence
 from collections import Counter
+import shutil
+import tempfile
 
-# ------------------
-# FLASK SETUP
-# ------------------
-app = Flask(__name__)
+# === LOAD TRAINED MODEL & SCALER ===
+model = joblib.load("duckling_svm_rbf_day4-13.pkl")
+scaler = joblib.load("duckling_scaler_day4-13.pkl")
 
-# ------------------
-# MODEL PATHS
-# ------------------
-MODEL_PATH = "duckling_svm_rbf_day4-13.pkl"
-SCALER_PATH = "duckling_scaler_day4-13.pkl"
-
-model = None
-scaler = None
-
-# ------------------
-# SETTINGS (MUST MATCH TRAINING)
-# ------------------
+# === SETTINGS ===
+TEMP_FOLDER = "temp_clips"
+OUTPUT_BASE = "predicted_dataset"   # final labeled dataset folder
 CLIP_LENGTH_MS = 3000
 MIN_SILENCE_LEN = 500
 SILENCE_THRESH = -45
 
-# ------------------
-# LOAD MODEL + SCALER
-# ------------------
-def load_models():
-    global model, scaler
-    try:
-        model = joblib.load(MODEL_PATH)
-        scaler = joblib.load(SCALER_PATH)
-        print("✅ Model & scaler loaded.")
-    except Exception as e:
-        print("❌ Failed to load model/scaler:", e)
-        model = None
-        scaler = None
-
-load_models()
-
-# ------------------
-# FEATURE EXTRACTION (MUST MATCH TRAINING!)
-# ------------------
+# === FEATURE EXTRACTION ===
 def extract_features(file_path):
     y, sr = librosa.load(file_path, sr=None)
     y = librosa.util.normalize(y)
@@ -61,27 +31,24 @@ def extract_features(file_path):
     spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
     spectral_rolloff = np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))
     zero_crossing_rate = np.mean(librosa.feature.zero_crossing_rate(y))
-    pitches, mags = librosa.piptrack(y=y, sr=sr)
+    pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
     pitch = np.mean(pitches[pitches > 0]) if np.any(pitches > 0) else 0
 
     return np.hstack([mfccs, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
 
-# ------------------
-# AUDIO PREPROCESSING
-# ------------------
-def preprocess_audio(input_path):
-    ext = os.path.splitext(input_path)[1].lower()
+# === STEP 1: CLEAN AUDIO & SPLIT INTO CLIPS ===
+def preprocess_audio(file_path):
+    os.makedirs(TEMP_FOLDER, exist_ok=True)
 
-    # Convert MP3/M4A → WAV (training used WAV)
+    # Auto-convert .mp3 / .m4a → .wav
+    ext = os.path.splitext(file_path)[1].lower()
     if ext in [".mp3", ".m4a"]:
-        audio = AudioSegment.from_file(input_path, format=ext.replace(".", ""))
-        temp_wav = input_path + ".converted.wav"
-        audio.export(temp_wav, format="wav")
-        input_path = temp_wav
+        audio_temp = AudioSegment.from_file(file_path, format=ext.replace('.', ''))
+        temp_wav_path = os.path.join(TEMP_FOLDER, "converted_temp.wav")
+        audio_temp.export(temp_wav_path, format="wav")
+        file_path = temp_wav_path
 
-    audio = AudioSegment.from_file(input_path)
-
-    # Remove silence
+    audio = AudioSegment.from_file(file_path)
     chunks = silence.split_on_silence(
         audio,
         min_silence_len=MIN_SILENCE_LEN,
@@ -92,98 +59,68 @@ def preprocess_audio(input_path):
     for c in chunks:
         combined += c + AudioSegment.silent(duration=100)
 
-    # Save cleaned audio for playback
-    cleaned_temp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    cleaned_path = cleaned_temp.name
-    combined.export(cleaned_path, format="wav")
-
-    # Slice into 3s clips
     clip_paths = []
-    for start in range(0, len(combined), CLIP_LENGTH_MS):
+    for i, start in enumerate(range(0, len(combined), CLIP_LENGTH_MS)):
         clip = combined[start:start + CLIP_LENGTH_MS]
         if len(clip) > 1000:
-            clip_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-            clip_path = clip_file.name
-            clip.export(clip_path, format="wav")
-            clip_paths.append(clip_path)
+            clip_name = os.path.join(TEMP_FOLDER, f"clip_{i+1}.wav")
+            clip.export(clip_name, format="wav")
+            clip_paths.append(clip_name)
 
-    return cleaned_path, clip_paths
+    return clip_paths
 
-# ------------------
-# CORE PREDICTION
-# ------------------
-def predict_from_clips(clip_paths):
-    preds = []
-    confs = []
-    cols = [f"mfcc{i+1}" for i in range(13)] + [
-        "spectral_centroid", "spectral_rolloff", "zero_crossing_rate", "pitch"
-    ]
+# === STEP 2: PREDICT & ORGANIZE ===
+def predict_and_organize(clip_paths):
+    cols = [f"mfcc{i+1}" for i in range(13)] + ["spectral_centroid", "spectral_rolloff", "zero_crossing_rate", "pitch"]
 
-    for clip_path in clip_paths:
-        feats = extract_features(clip_path).reshape(1, -1)
-        feats_df = pd.DataFrame(feats, columns=cols)
-        feats_scaled = scaler.transform(feats_df)
+    os.makedirs(os.path.join(OUTPUT_BASE, "male"), exist_ok=True)
+    os.makedirs(os.path.join(OUTPUT_BASE, "female"), exist_ok=True)
 
-        prob = model.predict_proba(feats_scaled)[0]
+    predictions = []
+    confidences = []
+
+    for i, path in enumerate(clip_paths):
+        features = extract_features(path).reshape(1, -1)
+        features_df = pd.DataFrame(features, columns=cols)
+        features_scaled = scaler.transform(features_df)
+
+        prob = model.predict_proba(features_scaled)[0]
         pred = model.classes_[np.argmax(prob)]
-        conf = max(prob) * 100
+        conf = round(max(prob) * 100, 2)
 
-        preds.append(pred)
-        confs.append(conf)
+        # Move and rename
+        dest_folder = os.path.join(OUTPUT_BASE, pred)
+        new_name = f"{pred}_clip_{i+1}.wav"
+        dest_path = os.path.join(dest_folder, new_name)
+        shutil.move(path, dest_path)
 
-    majority = max(preds, key=preds.count)
-    majority_conf = round((preds.count(majority) / len(preds)) * 100, 2)
+        predictions.append(pred)
+        confidences.append(conf)
 
-    return majority, majority_conf
+    summary = Counter(predictions)
+    total = len(predictions)
+    avg_conf = round(np.mean(confidences), 2)
+    majority = max(summary, key=summary.get)
 
-# ------------------
-# API ROUTES
-# ------------------
-@app.route("/status", methods=["GET"])
-def status():
-    return jsonify({"status": "ok", "model_loaded": model is not None})
+    return {
+        "total_clips": total,
+        "male_clips": summary.get("male", 0),
+        "female_clips": summary.get("female", 0),
+        "average_confidence": avg_conf,
+        "majority_prediction": majority
+    }
 
-@app.route("/predict", methods=["POST"])
-def predict():
-    if "audio" not in request.files:
-        return jsonify({"error": "No audio file uploaded"}), 400
+# === MAIN FUNCTION TO CALL WITH UPLOADED FILE ===
+def process_uploaded_file(file_path):
+    clips = preprocess_audio(file_path)
+    if len(clips) == 0:
+        return {"error": "Audio too short or silent"}
+    results = predict_and_organize(clips)
+    return results
 
-    file = request.files["audio"]
-
-    # Save uploaded file
-    input_tmp = tempfile.NamedTemporaryFile(delete=False)
-    input_path = input_tmp.name
-    file.save(input_path)
-
-    try:
-        # Preprocess (clean + slice)
-        cleaned_path, clip_paths = preprocess_audio(input_path)
-
-        if len(clip_paths) == 0:
-            return jsonify({"error": "Audio too short or silent"}), 400
-
-        # Predict
-        label, confidence = predict_from_clips(clip_paths)
-
-        # Return cleaned audio as base64 for Flutter
-        with open(cleaned_path, "rb") as f:
-            wav_base64 = base64.b64encode(f.read()).decode("utf-8")
-
-        return jsonify({
-            "prediction": label.lower(),
-            "confidence": confidence,
-            "wav_base64": wav_base64
-        })
-
-    finally:
-        # Cleanup all temp files
-        if os.path.exists(input_path): os.remove(input_path)
-        if os.path.exists(cleaned_path): os.remove(cleaned_path)
-        for c in clip_paths:
-            if os.path.exists(c): os.remove(c)
-
-# ------------------
-# RUN SERVER
-# ------------------
+# Example usage for testing:
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    import sys
+    test_file = sys.argv[1] if len(sys.argv) > 1 else "Raw datasets/Day11_girl/f5-11.m4a"
+    results = process_uploaded_file(test_file)
+    print(results)
