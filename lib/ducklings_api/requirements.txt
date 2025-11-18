@@ -10,3 +10,4 @@ werkzeug
 pandas
 imageio-ffmpeg
 scikit-learn==1.7.2
+python-multipart
