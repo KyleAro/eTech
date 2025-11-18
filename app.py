@@ -1,26 +1,29 @@
-# --- INSTALL THESE FIRST ---
-# pip install flask librosa pydub numpy pandas scikit-learn joblib
-
 from flask import Flask, request, jsonify
-from pydub import AudioSegment
+import os
+import librosa
 import numpy as np
 import pandas as pd
-import librosa
+from pydub import AudioSegment, silence
 import joblib
 from collections import Counter
-import io
+import tempfile
+import shutil
 
 # === LOAD MODEL & SCALER ===
 model = joblib.load("duckling_svm_rbf_day4-13.pkl")
 scaler = joblib.load("duckling_scaler_day4-13.pkl")
 
 # === SETTINGS ===
-CLIP_LENGTH_MS = 3000       # 3-second clips
-OVERLAP_MS = 1500           # 50% overlap for long audio
+CLIP_LENGTH_MS = 3000
+MIN_SILENCE_LEN = 500
+SILENCE_THRESH = -45
+
+app = Flask(__name__)
+
 
 # === FEATURE EXTRACTION ===
-def extract_features(audio_bytes):
-    y, sr = librosa.load(io.BytesIO(audio_bytes), sr=None)
+def extract_features(file_path):
+    y, sr = librosa.load(file_path, sr=None)
     y = librosa.util.normalize(y)
 
     mfccs = np.mean(librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13).T, axis=0)
@@ -32,74 +35,97 @@ def extract_features(audio_bytes):
 
     return np.hstack([mfccs, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
 
-# === SPLIT AUDIO INTO FIXED CLIPS WITH OVERLAP ===
-def split_audio_fixed(file_bytes, clip_length_ms=CLIP_LENGTH_MS, overlap_ms=OVERLAP_MS):
-    audio = AudioSegment.from_file(io.BytesIO(file_bytes))
-    clips = []
 
-    step = clip_length_ms - overlap_ms
-    for start in range(0, len(audio), step):
-        clip = audio[start:start + clip_length_ms]
-        if len(clip) > 500:  # keep very short segments
-            buf = io.BytesIO()
-            clip.export(buf, format="wav")
-            clips.append(buf.getvalue())
+# === PROCESS AUDIO (remove silence + split) ===
+def preprocess_audio(file_path):
+    temp_dir = tempfile.mkdtemp()
+    audio = AudioSegment.from_file(file_path)
 
-    return clips
+    chunks = silence.split_on_silence(
+        audio,
+        min_silence_len=MIN_SILENCE_LEN,
+        silence_thresh=SILENCE_THRESH
+    )
 
-# === PREDICT ===
-def predict_clips(clips):
-    cols = [f"mfcc{i+1}" for i in range(13)] + ["spectral_centroid", "spectral_rolloff", "zero_crossing_rate", "pitch"]
-    predictions = []
-    confidences = []
+    combined = AudioSegment.empty()
+    for c in chunks:
+        combined += c + AudioSegment.silent(duration=100)
 
-    for clip_bytes in clips:
-        features = extract_features(clip_bytes).reshape(1, -1)
-        features_df = pd.DataFrame(features, columns=cols)
-        features_scaled = scaler.transform(features_df)
+    clip_paths = []
+    for i, start in enumerate(range(0, len(combined), CLIP_LENGTH_MS)):
+        clip = combined[start:start + CLIP_LENGTH_MS]
+        if len(clip) > 1000:
+            clip_path = os.path.join(temp_dir, f"clip_{i+1}.wav")
+            clip.export(clip_path, format="wav")
+            clip_paths.append(clip_path)
 
-        prob = model.predict_proba(features_scaled)[0]
-        pred = model.classes_[np.argmax(prob)]
-        conf = round(max(prob) * 100, 2)
+    return clip_paths, temp_dir
 
-        predictions.append(pred)
-        confidences.append(conf)
-
-    if not predictions:
-        return None, None
-
-    # Majority vote for final prediction
-    summary = Counter(predictions)
-    majority_pred = max(summary, key=summary.get)
-    avg_conf = round(np.mean(confidences), 2)
-
-    return majority_pred, avg_conf
-
-# === FLASK APP ===
-app = Flask(__name__)
-
-@app.route("/status", methods=["GET"])
-def status():
-    # simple endpoint to check server readiness
-    return jsonify({"status": "ready"}), 200
 
 @app.route("/predict", methods=["POST"])
 def predict():
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
 
-    file_bytes = request.files["file"].read()
-    clips = split_audio_fixed(file_bytes)
+    uploaded_file = request.files["file"]
 
-    if not clips:
-        return jsonify({"error": "Audio too short or empty"}), 400
+    # ⬇️ Save temp input file
+    temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+    uploaded_file.save(temp_input.name)
 
-    prediction, confidence = predict_clips(clips)
-    if prediction is None:
-        return jsonify({"error": "Could not make prediction"}), 500
+    try:
+        # 1️⃣ Preprocess + segment audio
+        clips, temp_dir = preprocess_audio(temp_input.name)
+        if len(clips) == 0:
+            return jsonify({"error": "No valid audio found"}), 400
 
-    return jsonify({"prediction": prediction, "confidence": confidence}), 200
+        cols = [f"mfcc{i+1}" for i in range(13)] + \
+               ["spectral_centroid", "spectral_rolloff", "zero_crossing_rate", "pitch"]
+
+        predictions = []
+        confidences = []
+
+        # 2️⃣ Predict all clips
+        for clip_path in clips:
+            features = extract_features(clip_path).reshape(1, -1)
+            df = pd.DataFrame(features, columns=cols)
+            scaled = scaler.transform(df)
+
+            prob = model.predict_proba(scaled)[0]
+            pred = model.classes_[np.argmax(prob)]
+            conf = float(np.max(prob)) * 100
+
+            predictions.append(pred)
+            confidences.append(conf)
+
+        # 3️⃣ Final Result (Majority Vote)
+        summary = Counter(predictions)
+        final_prediction = max(summary, key=summary.get)
+        final_confidence = float(np.mean(confidences))
+
+        return jsonify({
+            "prediction": final_prediction,
+            "confidence": final_confidence
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        try:
+            shutil.rmtree(temp_dir)
+        except:
+            pass
+        try:
+            os.remove(temp_input.name)
+        except:
+            pass
+
+
+@app.route("/", methods=["GET"])
+def home():
+    return "Duckling Gender Classifier API is running."
+
 
 if __name__ == "__main__":
-    print("✅ Server is starting and ready to receive requests...")
-    app.run(host="0.0.0.0", port=8000)
+    app.run(host="0.0.0.0", port=5000)
