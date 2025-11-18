@@ -1,37 +1,28 @@
 # --- INSTALL THESE FIRST ---
-# pip install flask librosa pydub numpy pandas scikit-learn joblib
+# pip install librosa pydub numpy pandas scikit-learn joblib
 
 import os
-import tempfile
-import shutil
-import base64
-from flask import Flask, request, jsonify
+from pydub import AudioSegment, silence
 import numpy as np
 import pandas as pd
 import librosa
 import joblib
-from pydub import AudioSegment, silence
 from collections import Counter
-from werkzeug.utils import secure_filename
+import shutil
 
-app = Flask(__name__)
+# === LOAD TRAINED MODEL & SCALER ===
+model = joblib.load("duckling_svm_rbf_day4-13.pkl")
+scaler = joblib.load("duckling_scaler_day4-13.pkl")
 
-# -------------------------------
-# 🔥 LOAD MODEL & SCALER
-# -------------------------------
-model = joblib.load(r"C:\Users\User\OneDrive - Innobyte\Desktop\etech\duckling_svm_rbf_day4-13.pkl")
-scaler = joblib.load(r"C:\Users\User\OneDrive - Innobyte\Desktop\etech\duckling_scaler_day4-13.pkl")
-
-# -------------------------------
-# 🔥 SETTINGS
-# -------------------------------
+# === SETTINGS ===
+INPUT_FILE = "Raw datasets/Day11_girl/f5-11.m4a"  # <-- your file here
+TEMP_FOLDER = "temp_clips"
+OUTPUT_BASE = "predicted_dataset"   # final labeled dataset folder
 CLIP_LENGTH_MS = 3000
 MIN_SILENCE_LEN = 500
 SILENCE_THRESH = -45
 
-# -------------------------------
-# 🔥 FEATURE EXTRACTION
-# -------------------------------
+# === FEATURE EXTRACTION ===
 def extract_features(file_path):
     y, sr = librosa.load(file_path, sr=None)
     y = librosa.util.normalize(y)
@@ -45,17 +36,20 @@ def extract_features(file_path):
 
     return np.hstack([mfccs, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
 
-# -------------------------------
-# 🔥 AUDIO PREPROCESSING
-# -------------------------------
+# === STEP 1: CLEAN AUDIO (REMOVE DEAD AIR + SPLIT INTO 3s) ===
 def preprocess_audio(file_path):
-    # Auto-convert .mp3 / .m4a → .wav
+    print("🎧 Cleaning and splitting audio...")
+    os.makedirs(TEMP_FOLDER, exist_ok=True)
+
+    # ✅ Auto-convert .mp3 / .m4a → .wav
     ext = os.path.splitext(file_path)[1].lower()
     if ext in [".mp3", ".m4a"]:
+        print(f"🔄 Converting {ext} to WAV...")
         audio_temp = AudioSegment.from_file(file_path, format=ext.replace('.', ''))
-        temp_wav_path = file_path.rsplit(".", 1)[0] + ".wav"
+        temp_wav_path = os.path.join(TEMP_FOLDER, "converted_temp.wav")
         audio_temp.export(temp_wav_path, format="wav")
         file_path = temp_wav_path
+        print("✅ Conversion complete.\n")
 
     audio = AudioSegment.from_file(file_path)
     chunks = silence.split_on_silence(
@@ -69,82 +63,66 @@ def preprocess_audio(file_path):
         combined += c + AudioSegment.silent(duration=100)
 
     clip_paths = []
-    temp_dir = tempfile.mkdtemp()
     for i, start in enumerate(range(0, len(combined), CLIP_LENGTH_MS)):
         clip = combined[start:start + CLIP_LENGTH_MS]
         if len(clip) > 1000:
-            clip_name = os.path.join(temp_dir, f"clip_{i+1}.wav")
+            clip_name = os.path.join(TEMP_FOLDER, f"clip_{i+1}.wav")
             clip.export(clip_name, format="wav")
             clip_paths.append(clip_name)
 
-    return clip_paths, temp_dir
+    print(f"✅ {len(clip_paths)} clips generated for prediction.\n")
+    return clip_paths
 
-# -------------------------------
-# 🔥 STATUS ENDPOINT
-# -------------------------------
-@app.route("/status", methods=["GET"])
-def status():
-    try:
-        if model is None or scaler is None:
-            return jsonify({"status": "Model or scaler not loaded"}), 500
-        return jsonify({"status": "Server is running"}), 200
-    except Exception as e:
-        return jsonify({"status": f"Server error: {str(e)}"}), 503
+# === STEP 2: PREDICT EACH CLIP & AUTO-SORT ===
+def predict_and_organize(clip_paths):
+    print("🔍 Predicting and sorting clips...")
+    cols = [f"mfcc{i+1}" for i in range(13)] + ["spectral_centroid", "spectral_rolloff", "zero_crossing_rate", "pitch"]
 
-# -------------------------------
-# 🔥 PREDICT ENDPOINT
-# -------------------------------
-@app.route("/predict", methods=["POST"])
-def predict():
-    audio_file = request.files.get("audio")
-    if not audio_file:
-        return jsonify({"error": "No audio file uploaded"}), 400
+    os.makedirs(os.path.join(OUTPUT_BASE, "male"), exist_ok=True)
+    os.makedirs(os.path.join(OUTPUT_BASE, "female"), exist_ok=True)
 
-    filename = secure_filename(audio_file.filename)
-    temp_path = os.path.join(tempfile.gettempdir(), filename)
-    audio_file.save(temp_path)
+    predictions = []
+    confidences = []
 
-    try:
-        clip_paths, temp_dir = preprocess_audio(temp_path)
-        if not clip_paths:
-            return jsonify({"error": "Audio too silent or too short"}), 400
+    for i, path in enumerate(clip_paths):
+        features = extract_features(path).reshape(1, -1)
+        features_df = pd.DataFrame(features, columns=cols)
+        features_scaled = scaler.transform(features_df)
 
-        predictions = []
-        confidences = []
+        prob = model.predict_proba(features_scaled)[0]
+        pred = model.classes_[np.argmax(prob)]
+        conf = round(max(prob) * 100, 2)
 
-        for clip_path in clip_paths:
-            features = extract_features(clip_path).reshape(1, -1)
-            features_scaled = scaler.transform(features)
-            prob = model.predict_proba(features_scaled)[0]
-            pred = model.classes_[np.argmax(prob)]
-            conf = float(np.max(prob) * 100)
-            predictions.append(pred)
-            confidences.append(conf)
+        # Move and rename
+        dest_folder = os.path.join(OUTPUT_BASE, pred)
+        new_name = f"{pred}_clip_{i+1}.wav"
+        dest_path = os.path.join(dest_folder, new_name)
+        shutil.move(path, dest_path)
 
-        # Majority vote
-        summary = Counter(predictions)
-        majority_class = max(summary, key=summary.get)
-        avg_conf = round(np.mean(confidences), 2)
+        print(f"{os.path.basename(path)} → {pred} ({conf}%) → saved as {new_name}")
 
-        # Encode first clip WAV as Base64
-        with open(clip_paths[0], "rb") as f:
-            wav_base64 = base64.b64encode(f.read()).decode("utf-8")
+        predictions.append(pred)
+        confidences.append(conf)
 
-        return jsonify({
-            "prediction": majority_class,
-            "confidence": avg_conf,
-            "wav_base64": wav_base64
-        })
+    # === FINAL SUMMARY ===
+    print("\n📊 PREDICTION SUMMARY 📊")
+    summary = Counter(predictions)
+    total = len(predictions)
+    avg_conf = round(np.mean(confidences), 2)
 
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
+    print(f"Total clips processed: {total}")
+    print(f"Male clips: {summary.get('male', 0)}")
+    print(f"Female clips: {summary.get('female', 0)}")
+    print(f"Average confidence: {avg_conf}%")
 
-# -------------------------------
-# 🔥 RUN SERVER (Render-ready)
-# -------------------------------
+    # Optional: print majority class
+    majority = max(summary, key=summary.get)
+    print(f"\n🎯 Final Majority Prediction: {majority.upper()}")
+    print("✅ All files saved in:", OUTPUT_BASE)
+
+# === RUN ===
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    clips = preprocess_audio(INPUT_FILE)
+    predict_and_organize(clips)
+
+
