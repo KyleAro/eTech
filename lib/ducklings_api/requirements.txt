@@ -1,3 +1,5 @@
+fastapi
+uvicorn
 Flask
 librosa
 numpy
@@ -7,3 +9,4 @@ soundfile
 werkzeug
 pandas
 imageio-ffmpeg
+scikit-learn==1.7.2

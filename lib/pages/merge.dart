@@ -257,7 +257,9 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
   try {
     var request = http.MultipartRequest(
       'POST',
-      Uri.parse("https://etech-rgsx.onrender.com/predict"),
+      Uri.parse("http://192.168.1.15:8000/predict")
+
+,
     );
 
     request.files.add(await http.MultipartFile.fromPath('file', file.path));
