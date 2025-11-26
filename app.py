@@ -1,13 +1,13 @@
 # --- INSTALL THESE FIRST ---
-# pip install flask librosa pydub numpy pandas scikit-learn joblib
+# pip install flask librosa numpy pandas scikit-learn joblib pydub
 
 from flask import Flask, request, jsonify
-from pydub import AudioSegment, silence
 import numpy as np
 import pandas as pd
 import librosa
 import joblib
 from collections import Counter
+from pydub import AudioSegment, silence
 import io
 import threading
 
@@ -29,11 +29,12 @@ def warm_up():
     server_ready = True
     print("Server ready!")
 
-# Start warm-up in a separate thread so Render responds immediately
+# Warm-up in a separate thread
 threading.Thread(target=warm_up).start()
 
 # === FEATURE EXTRACTION ===
 def extract_features(audio_bytes):
+    # Load audio bytes into librosa (already PCM WAV)
     y, sr = librosa.load(io.BytesIO(audio_bytes), sr=None)
     y = librosa.util.normalize(y)
 
@@ -46,16 +47,17 @@ def extract_features(audio_bytes):
 
     return np.hstack([mfccs, spectral_centroid, spectral_rolloff, zero_crossing_rate, pitch])
 
-# === SPLIT AUDIO ON SILENCE & CLIP ===
+# === SPLIT AUDIO ===
 def split_audio(file_bytes):
-    # Create AudioSegment directly from raw PCM16 bytes
+    # Create AudioSegment from raw PCM16 bytes
     audio = AudioSegment(
         data=file_bytes,
-        sample_width=2,       # 16-bit PCM
-        frame_rate=16000,     # 16kHz (must match Flutter recording)
-        channels=1            # mono (must match Flutter recording)
+        sample_width=2,   # 16-bit PCM
+        frame_rate=16000, # 16kHz (matches Flutter)
+        channels=1        # mono
     )
 
+    # Split on silence
     chunks = silence.split_on_silence(audio, min_silence_len=MIN_SILENCE_LEN, silence_thresh=SILENCE_THRESH)
 
     combined = AudioSegment.empty()
@@ -67,7 +69,7 @@ def split_audio(file_bytes):
         clip = combined[start:start + CLIP_LENGTH_MS]
         if len(clip) > 1000:
             buf = io.BytesIO()
-            clip.export(buf, format="wav")  # Keep WAV for librosa
+            clip.export(buf, format="wav")  # librosa expects WAV
             clips.append(buf.getvalue())
     return clips
 
@@ -104,7 +106,7 @@ app = Flask(__name__)
 @app.route("/predict", methods=["POST"])
 def predict():
     if not server_ready:
-        return jsonify({"status": "error", "message": "Server warming up, try again in a few seconds"}), 503
+        return jsonify({"status": "error", "message": "Server warming up"}), 503
 
     if "file" not in request.files:
         return jsonify({"status": "error", "message": "No file uploaded"}), 400
@@ -121,7 +123,6 @@ def predict():
 
     return jsonify({"status": "success", "prediction": prediction, "confidence": confidence})
 
-# === SERVER STATUS ENDPOINT ===
 @app.route("/status", methods=["GET"])
 def status():
     return jsonify({"status": "ready" if server_ready else "warming_up"})

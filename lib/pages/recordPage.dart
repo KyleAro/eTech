@@ -101,7 +101,7 @@ class _RecordPageState extends State<RecordPage> {
     request.files.add(await http.MultipartFile.fromPath(
       "file",
       pcmFile,
-      contentType: MediaType('audio', 'pcm'),
+      contentType: MediaType('application', 'octet-stream')
     ));
 
     final response = await request.send();
