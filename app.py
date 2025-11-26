@@ -111,7 +111,7 @@ def predict():
     # Prediction per clip
     clip_results = []
     cols = [f"mfcc{i+1}" for i in range(13)] + ["spectral_centroid", "spectral_rolloff", "zero_crossing_rate", "pitch"]
-    
+
     for idx, clip_bytes in enumerate(clips, 1):
         features = extract_features(clip_bytes).reshape(1, -1)
         features_df = pd.DataFrame(features, columns=cols)
@@ -120,18 +120,12 @@ def predict():
         prob = model.predict_proba(features_scaled)[0]
         pred_class = model.classes_[np.argmax(prob)]
         conf = round(max(prob) * 100, 2)
-        
-        filename = f"{pred_class}_clip_{idx}.wav"
-        clip_results.append({
-            "clip": f"clip_{idx}.wav",
-            "prediction": pred_class,
-            "confidence": conf,
-            "saved_as": filename
-        })
 
-        # Optionally save the clip
-        with open(f"predicted_dataset/{filename}", "wb") as f:
-            f.write(clip_bytes)
+        clip_results.append({
+            "clip": f"clip_{idx}.wav",  # just for reference
+            "prediction": pred_class,
+            "confidence": conf
+        })
 
     # Summary
     summary_counter = Counter([c["prediction"] for c in clip_results])
@@ -147,7 +141,6 @@ def predict():
         "average_confidence": avg_conf,
         "final_prediction": majority_pred
     })
-
 # === SERVER STATUS ENDPOINT ===
 @app.route("/status", methods=["GET"])
 def status():

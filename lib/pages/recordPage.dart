@@ -31,9 +31,9 @@ class _RecordPageState extends State<RecordPage> {
   bool isProcessingAudio = false;
   bool isPredicting = false;
 
-  String? rawAacPath;         // Original recording
-  String? cleanedAacPath;     // Processed AAC (dead air removed + duck isolated)
-  String? playableWavPath;    // WAV version for audio player
+  String? rawAacPath;
+  String? cleanedAacPath;
+  String? playableWavPath;
 
   @override
   void initState() {
@@ -98,18 +98,15 @@ class _RecordPageState extends State<RecordPage> {
     }
   }
 
-  // Send CLEANED AAC to ML server
   Future<Map<String, dynamic>> _sendToMLServer(String filePath) async {
     final uri = Uri.parse("https://etech-rgsx.onrender.com/predict");
-
     final request = http.MultipartRequest("POST", uri);
     request.files.add(await http.MultipartFile.fromPath(
       "file",
       filePath,
       contentType: MediaType('file', 'aac'),
     ));
-   print("📄 Multipart request prepared with file: $filePath");
-   
+
     final response = await request.send();
     final respStr = await response.stream.bytesToString();
 
@@ -135,10 +132,11 @@ class _RecordPageState extends State<RecordPage> {
       enableDrag: false,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) =>
-          StatefulBuilder(builder: (context, setModalState) {
+      builder: (context) => StatefulBuilder(builder: (context, setModalState) {
+        Map<String, dynamic>? predictionData;
+
         return FractionallySizedBox(
-          heightFactor: 0.6,
+          heightFactor: 0.7,
           child: Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -158,16 +156,12 @@ class _RecordPageState extends State<RecordPage> {
                 StreamBuilder<RecordingDisposition>(
                   stream: recorder.onProgress,
                   builder: (context, snapshot) {
-                    final duration =
-                        snapshot.hasData ? snapshot.data!.duration : Duration.zero;
+                    final duration = snapshot.hasData ? snapshot.data!.duration : Duration.zero;
                     final text =
                         '${duration.inMinutes.toString().padLeft(2, '0')}:${(duration.inSeconds % 60).toString().padLeft(2, '0')}';
                     return Text(
                       text,
-                      style: const TextStyle(
-                          fontSize: 50,
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold),
+                      style: const TextStyle(fontSize: 50, color: Colors.white, fontWeight: FontWeight.bold),
                     );
                   },
                 ),
@@ -182,18 +176,16 @@ class _RecordPageState extends State<RecordPage> {
                         backgroundColor: secondColor),
                     onPressed: () async {
                       await stopRecording();
-
-                      // 🔥 PROCESS AUDIO
                       setModalState(() => isProcessingAudio = true);
+
                       try {
-                        cleanedAacPath =
-                            await AudioProcessor.processAudio(rawAacPath!);
-                        playableWavPath =
-                            await AudioProcessor.convertToWav(cleanedAacPath!);
+                        cleanedAacPath = await AudioProcessor.processAudio(rawAacPath!);
+                        playableWavPath = await AudioProcessor.convertToWav(cleanedAacPath!);
                       } catch (e) {
                         cleanedAacPath = rawAacPath;
                         playableWavPath = rawAacPath;
                       }
+
                       setModalState(() {
                         isProcessingAudio = false;
                         showExtraButtons = true;
@@ -202,103 +194,116 @@ class _RecordPageState extends State<RecordPage> {
                     child: const Icon(Icons.stop, size: 30, color: Colors.white),
                   ),
 
-                // Processing indicator
                 if (isProcessingAudio) ...[
                   const SizedBox(height: 20),
                   const CircularProgressIndicator(color: Colors.white),
                   const SizedBox(height: 10),
-                  const Text("Cleaning audio...",
-                      style: TextStyle(color: Colors.white)),
+                  const Text("Cleaning audio...", style: TextStyle(color: Colors.white)),
                 ],
 
                 const SizedBox(height: 20),
 
-                // PLAY CLEANED AUDIO (WAV)
+                // Audio Player
                 if (showExtraButtons && playableWavPath != null)
-                  AudioPlayerControls(
-                      audioPlayer: audioPlayerService, filePath: playableWavPath!),
+                  AudioPlayerControls(audioPlayer: audioPlayerService, filePath: playableWavPath!),
 
                 const SizedBox(height: 20),
 
-                // PREDICT + DISCARD
+                // Predict + Discard
                 if (showExtraButtons)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  Column(
                     children: [
-                      // Predict
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: isPredicting
-                                ? Colors.grey
-                                : Colors.blueAccent,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 40, vertical: 15)),
-                        onPressed: (cleanedAacPath == null || isPredicting)
-                            ? null
-                            : () async {
-                                setState(() => isPredicting = true);
-                                try {
-                                  final predictionData =
-                                      await _sendToMLServer(cleanedAacPath!);
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isPredicting ? Colors.grey : Colors.blueAccent,
+                              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                            ),
+                            onPressed: (cleanedAacPath == null || isPredicting)
+                                ? null
+                                : () async {
+                                    setState(() => isPredicting = true);
+                                    try {
+                                      final data = await _sendToMLServer(cleanedAacPath!);
+                                      predictionData = data;
 
-                                  Uint8List? wavBytes;
-                                  if (predictionData['wav_base64'] != "") {
-                                    wavBytes =
-                                        base64Decode(predictionData['wav_base64']);
-                                  }
+                                      Uint8List? wavBytes;
+                                      if (data['wav_base64'] != "") {
+                                        wavBytes = base64Decode(data['wav_base64']);
+                                      }
 
-                                  ResultBottomSheet.show(
-                                    context,
-                                    prediction: predictionData["prediction"],
-                                    confidence: predictionData["confidence"],
-                                    rawBytes: wavBytes,
-                                    baseName: titleController.text.trim(),
-                                  );
-                                } catch (e) {
-                                  ResultBottomSheet.show(
-                                    context,
-                                    prediction: "Prediction failed",
-                                    confidence: 0.0,
-                                    isError: true,
-                                  );
-                                } finally {
-                                  setState(() => isPredicting = false);
-                                }
-                              },
-                        child: isPredicting
-                            ? const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2.5,
-                                        color: Colors.white),
-                                  ),
-                                  SizedBox(width: 10),
-                                  Text('Predicting...',
-                                      style: TextStyle(color: Colors.white)),
-                                ],
-                              )
-                            : const Text('Predict',
-                                style: TextStyle(color: Colors.white)),
+                                      ResultBottomSheet.show(
+                                        context,
+                                        prediction: data["prediction"],
+                                        confidence: data["confidence"]?.toDouble() ?? 0.0,
+                                        rawBytes: wavBytes,
+                                        baseName: titleController.text.trim(),
+                                      );
+
+                                      setModalState(() {});
+                                    } catch (e) {
+                                      ResultBottomSheet.show(
+                                        context,
+                                        prediction: "Prediction failed",
+                                        confidence: 0.0,
+                                        isError: true,
+                                      );
+                                    } finally {
+                                      setState(() => isPredicting = false);
+                                    }
+                                  },
+                            child: isPredicting
+                                ? const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                                      ),
+                                      SizedBox(width: 10),
+                                      Text('Predicting...', style: TextStyle(color: Colors.white)),
+                                    ],
+                                  )
+                                : const Text('Predict', style: TextStyle(color: Colors.white)),
+                          ),
+
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color.fromARGB(255, 223, 111, 103),
+                                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15)),
+                            onPressed: () async {
+                              await stopRecording(discard: true);
+                              Navigator.pop(context);
+                            },
+                            child: const Text('Discard', style: TextStyle(color: Colors.white)),
+                          ),
+                        ],
                       ),
+                      const SizedBox(height: 20),
 
-                      // Discard
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor:
-                                const Color.fromARGB(255, 223, 111, 103),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 40, vertical: 15)),
-                        onPressed: () async {
-                          await stopRecording(discard: true);
-                          Navigator.pop(context);
-                        },
-                        child: const Text('Discard',
-                            style: TextStyle(color: Colors.white)),
-                      ),
+                      if (predictionData != null)
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[800],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            children: [
+                              Text("Final Prediction: ${predictionData?['final_prediction'] ?? 'Unknown'}",
+                                  style: const TextStyle(color: Colors.white, fontSize: 18)),
+                              const SizedBox(height: 8),
+                              Text("Male Clips: ${predictionData?['male_clips'] ?? 0}", style: const TextStyle(color: Colors.white70)),
+                              Text("Female Clips: ${predictionData?['female_clips'] ?? 0}", style: const TextStyle(color: Colors.white70)),
+                              Text(
+                                  "Average Confidence: ${(predictionData?['average_confidence']?.toDouble() ?? 0.0).toStringAsFixed(2)}%",
+                                  style: const TextStyle(color: Colors.white70)),
+                            ],
+                          ),
+                        ),
                     ],
                   ),
               ],
@@ -325,15 +330,12 @@ class _RecordPageState extends State<RecordPage> {
                 width: 200,
                 child: NeuBox(
                   isPressed: isRecording,
-                  child: Icon(isRecording ? Icons.stop : Icons.mic,
-                      size: 100, color: Colors.black),
+                  child: Icon(isRecording ? Icons.stop : Icons.mic, size: 100, color: Colors.black),
                 ),
               ),
             ),
           ),
         ),
-
-        // ML Prediction Loading Overlay
         if (isPredicting)
           Positioned.fill(
             child: Container(
@@ -343,8 +345,7 @@ class _RecordPageState extends State<RecordPage> {
                 children: const [
                   CircularProgressIndicator(color: Colors.white),
                   SizedBox(height: 20),
-                  Text("Predicting...",
-                      style: TextStyle(color: Colors.white, fontSize: 18)),
+                  Text("Predicting...", style: TextStyle(color: Colors.white, fontSize: 18)),
                 ],
               ),
             ),
