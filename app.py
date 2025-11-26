@@ -108,39 +108,12 @@ def predict():
     if not clips:
         return jsonify({"status": "error", "message": "Audio too short or silent"}), 400
 
-    # Prediction per clip
-    clip_results = []
-    cols = [f"mfcc{i+1}" for i in range(13)] + ["spectral_centroid", "spectral_rolloff", "zero_crossing_rate", "pitch"]
+    prediction, confidence = predict_clips(clips)
+    if prediction is None:
+        return jsonify({"status": "error", "message": "Could not make prediction"}), 500
 
-    for idx, clip_bytes in enumerate(clips, 1):
-        features = extract_features(clip_bytes).reshape(1, -1)
-        features_df = pd.DataFrame(features, columns=cols)
-        features_scaled = scaler.transform(features_df)
+    return jsonify({"status": "success", "prediction": prediction, "confidence": confidence})
 
-        prob = model.predict_proba(features_scaled)[0]
-        pred_class = model.classes_[np.argmax(prob)]
-        conf = round(max(prob) * 100, 2)
-
-        clip_results.append({
-            "clip": f"clip_{idx}.wav",  # just for reference
-            "prediction": pred_class,
-            "confidence": conf
-        })
-
-    # Summary
-    summary_counter = Counter([c["prediction"] for c in clip_results])
-    majority_pred = max(summary_counter, key=summary_counter.get)
-    avg_conf = round(np.mean([c["confidence"] for c in clip_results]), 2)
-
-    return jsonify({
-        "status": "success",
-        "prediction_summary": clip_results,
-        "total_clips": len(clips),
-        "male_clips": summary_counter.get("male", 0),
-        "female_clips": summary_counter.get("female", 0),
-        "average_confidence": avg_conf,
-        "final_prediction": majority_pred
-    })
 # === SERVER STATUS ENDPOINT ===
 @app.route("/status", methods=["GET"])
 def status():
