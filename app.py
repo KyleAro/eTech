@@ -48,7 +48,14 @@ def extract_features(audio_bytes):
 
 # === SPLIT AUDIO ON SILENCE & CLIP ===
 def split_audio(file_bytes):
-    audio = AudioSegment.from_file(io.BytesIO(file_bytes))
+    # Create AudioSegment directly from raw PCM16 bytes
+    audio = AudioSegment(
+        data=file_bytes,
+        sample_width=2,       # 16-bit PCM
+        frame_rate=16000,     # 16kHz (must match Flutter recording)
+        channels=1            # mono (must match Flutter recording)
+    )
+
     chunks = silence.split_on_silence(audio, min_silence_len=MIN_SILENCE_LEN, silence_thresh=SILENCE_THRESH)
 
     combined = AudioSegment.empty()
@@ -60,7 +67,7 @@ def split_audio(file_bytes):
         clip = combined[start:start + CLIP_LENGTH_MS]
         if len(clip) > 1000:
             buf = io.BytesIO()
-            clip.export(buf, format="wav")
+            clip.export(buf, format="wav")  # Keep WAV for librosa
             clips.append(buf.getvalue())
     return clips
 

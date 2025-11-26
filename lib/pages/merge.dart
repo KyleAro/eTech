@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:async';
 import 'package:etech/pages/MainPage.dart';
 import 'package:flutter/material.dart';
@@ -12,7 +11,7 @@ import '../database/firebase_con.dart';
 import '../database/firestore_con.dart';
 import '../widgets/stateless/loading_screen.dart';
 import 'package:lottie/lottie.dart';
-import 'package:ffmpeg_kit_flutter_new_min_gpl/ffmpeg_kit.dart';
+import '../widgets/stateless/result_botsheet.dart'; // Reusable bottom sheet
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -95,186 +94,86 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
     );
   }
 
-  // Show prediction result
+  // ✅ Replaced showResultBottomSheet with reusable bottom sheet
   void _showResultBottomSheet(String prediction, double confidence, {bool isError = false}) {
-    Color bgColor;
-    Color textColor = Colors.black87;
-    String displayText = prediction;
-
-    if (isError) {
-      bgColor = const Color(0xFFFF8A80);
-      textColor = Colors.white;
-    } else {
-      if (prediction.toLowerCase() == 'female') {
-        bgColor = const Color(0xFFFFC0CB);
-      } else if (prediction.toLowerCase() == 'male') {
-        bgColor = const Color(0xFFADD8E6);
-      } else {
-        bgColor = Colors.grey[900]!;
-        textColor = Colors.white;
-      }
-    }
-
-    setState(() => showConfetti = !isError);
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext context) {
-        return FractionallySizedBox(
-          heightFactor: 0.55,
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: bgColor,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (isError) ...[
-                      const Text(
-                        "An Error Occurred",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        displayText,
-                        style: const TextStyle(color: Colors.white70, fontSize: 18),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 20),
-                      Lottie.asset('assets/anim/error.json', width: 160, height: 160, repeat: true),
-                    ] else ...[
-                      if (prediction.toLowerCase() == "female")
-                        Lottie.asset('assets/anim/girl.json', width: 160, height: 160, repeat: true)
-                      else if (prediction.toLowerCase() == "male")
-                        Lottie.asset('assets/anim/boy.json', width: 160, height: 160, repeat: true),
-                      Text(
-                        prediction,
-                        style: TextStyle(color: textColor, fontSize: 28, fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        "Confidence: ${confidence.toStringAsFixed(2)}%",
-                        style: TextStyle(color: textColor, fontSize: 18),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                    const SizedBox(height: 25),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: secondColor,
-                      ),
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text("Try Again", style: TextStyle(color: Colors.black)),
-                    ),
-                  ],
-                ),
-                if (!isError && showConfetti)
-                  Lottie.asset(
-                    'assets/anim/confetti.json',
-                    width: 220,
-                    height: 220,
-                    repeat: false,
-                    onLoaded: (composition) {
-                      Future.delayed(composition.duration, () {
-                        if (mounted) setState(() => showConfetti = false);
-                      });
-                    },
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
+    ResultBottomSheet.show(
+      context,
+      prediction: prediction,
+      confidence: confidence,
+      isError: isError,
     );
   }
-
 
   Future<void> _pickAndSendFile() async {
-  // Pick audio file
-  FilePickerResult? resultPicker =
-      await FilePicker.platform.pickFiles(type: FileType.audio);
+    // Pick audio file
+    FilePickerResult? resultPicker =
+        await FilePicker.platform.pickFiles(type: FileType.audio);
 
-  if (resultPicker == null) return; // user canceled
+    if (resultPicker == null) return; // user canceled
 
-  File? file;
-  final pickedFile = resultPicker.files.single;
+    File? file;
+    final pickedFile = resultPicker.files.single;
 
-  // Safely handle file path or bytes
-  if (pickedFile.path != null) {
-    file = File(pickedFile.path!);
-  } else if (pickedFile.bytes != null) {
-    final dir = await getTemporaryDirectory();
-    final tempFile = File('${dir.path}/${pickedFile.name}');
-    await tempFile.writeAsBytes(pickedFile.bytes!);
-    file = tempFile;
-  } else {
-    _showResultBottomSheet("Invalid file selected", 0.0, isError: true);
-    return;
-  }
+    // Safely handle file path or bytes
+    if (pickedFile.path != null) {
+      file = File(pickedFile.path!);
+    } else if (pickedFile.bytes != null) {
+      final dir = await getTemporaryDirectory();
+      final tempFile = File('${dir.path}/${pickedFile.name}');
+      await tempFile.writeAsBytes(pickedFile.bytes!);
+      file = tempFile;
+    } else {
+      _showResultBottomSheet("Invalid file selected", 0.0, isError: true);
+      return;
+    }
 
+    setState(() {
+      loading = true;
+    });
 
-  setState(() {
-    loading = true;
-  });
-
-  // Show loader
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (_) => const LoadingScreen(
-      animationAsset: 'assets/anim/loading2.json',
-      message: "Analyzing audio...",
-      backgroundColor: secondColor,
-      textColor: textcolor,
-    ),
-  );
-
-  try {
-    var request = http.MultipartRequest(
-      'POST',
-      Uri.parse("https://etech-rgsx.onrender.com/predict"),
+    // Show loader
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const LoadingScreen(
+        animationAsset: 'assets/anim/loading2.json',
+        message: "Analyzing audio...",
+        backgroundColor: secondColor,
+        textColor: textcolor,
+      ),
     );
 
-    request.files.add(await http.MultipartFile.fromPath('file', file.path));
-    var response = await request.send();
-    var respStr = await response.stream.bytesToString();
+    try {
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse("https://etech-rgsx.onrender.com/predict"),
+      );
 
-    if (response.statusCode == 200) {
-      var data = json.decode(respStr);
-      String prediction = data['prediction'];
-      prediction = prediction[0].toUpperCase() + prediction.substring(1);
-      double confidence = data['confidence'];
+      request.files.add(await http.MultipartFile.fromPath('file', file.path));
+      var response = await request.send();
+      var respStr = await response.stream.bytesToString();
 
-      Navigator.pop(context); // close loader
-      _showResultBottomSheet(prediction, confidence);
-    } else {
+      if (response.statusCode == 200) {
+        var data = json.decode(respStr);
+        String prediction = data['prediction'];
+        prediction = prediction[0].toUpperCase() + prediction.substring(1);
+        double confidence = data['confidence'];
+
+        Navigator.pop(context); // close loader
+        _showResultBottomSheet(prediction, confidence);
+      } else {
+        Navigator.pop(context);
+        _showResultBottomSheet("Server Error", 0.0, isError: true);
+      }
+    } catch (e) {
       Navigator.pop(context);
-      _showResultBottomSheet("Server Error", 0.0, isError: true);
+      _showResultBottomSheet("", 0.0, isError: true);
+    } finally {
+      setState(() {
+        loading = false;
+      });
     }
-  } catch (e) {
-    Navigator.pop(context);
-    _showResultBottomSheet("Error: $e", 0.0, isError: true);
-  } finally {
-    setState(() {
-      loading = false;
-    });
   }
-}
-
 
   @override
   Widget build(BuildContext context) {

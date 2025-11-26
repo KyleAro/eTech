@@ -15,7 +15,7 @@ model = joblib.load(r"C:\Users\User\OneDrive - Innobyte\Desktop\etech\duckling_s
 scaler = joblib.load(r"C:\Users\User\OneDrive - Innobyte\Desktop\etech\duckling_scaler_day4-13.pkl")
 
 # === SETTINGS ===
-INPUT_FILE = r"C:\Users\User\OneDrive - Innobyte\Desktop\etech\lib\ducklings_api\Male-5-Day-12-mhknoi9s399gcc.mp3"  # <-- your file here
+INPUT_FILE = r"C:\Users\User\OneDrive - Innobyte\Desktop\etech\lib\ducklings_api\Male-1-Day-12-mhknn9z8hgbvcy.mp3"  # <-- your file here
 TEMP_FOLDER = "temp_clips"
 OUTPUT_BASE = "predicted_dataset"   # final labeled dataset folder
 CLIP_LENGTH_MS = 3000
