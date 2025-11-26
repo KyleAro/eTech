@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:etech/pages/MainPage.dart';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 
@@ -140,7 +141,7 @@ class AudioPlayerControls extends StatelessWidget {
               min: 0,
               max: totalSeconds,
               value: currentSeconds,
-              activeColor: Colors.amber,
+              activeColor: secondColor,
               inactiveColor: const Color.fromARGB(94, 255, 255, 255),
               onChanged: (value) {
                 if (isCurrent) audioPlayer.seek(Duration(seconds: value.toInt()));

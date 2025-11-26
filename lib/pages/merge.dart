@@ -104,76 +104,97 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
     );
   }
 
-  Future<void> _pickAndSendFile() async {
-    // Pick audio file
-    FilePickerResult? resultPicker =
-        await FilePicker.platform.pickFiles(type: FileType.audio);
+ Future<void> _pickAndSendFile() async {
+  // Pick audio file
+  FilePickerResult? resultPicker =
+      await FilePicker.platform.pickFiles(type: FileType.audio);
 
-    if (resultPicker == null) return; // user canceled
+  if (resultPicker == null) return; 
 
-    File? file;
-    final pickedFile = resultPicker.files.single;
+  File? file;
+  final pickedFile = resultPicker.files.single;
 
-    // Safely handle file path or bytes
-    if (pickedFile.path != null) {
-      file = File(pickedFile.path!);
-    } else if (pickedFile.bytes != null) {
-      final dir = await getTemporaryDirectory();
-      final tempFile = File('${dir.path}/${pickedFile.name}');
-      await tempFile.writeAsBytes(pickedFile.bytes!);
-      file = tempFile;
-    } else {
-      _showResultBottomSheet("Invalid file selected", 0.0, isError: true);
-      return;
-    }
+  // Safely handle file path or bytes
+  if (pickedFile.path != null) {
+    file = File(pickedFile.path!);
+  } else if (pickedFile.bytes != null) {
+    final dir = await getTemporaryDirectory();
+    final tempFile = File('${dir.path}/${pickedFile.name}');
+    await tempFile.writeAsBytes(pickedFile.bytes!);
+    file = tempFile;
+  } else {
+    _showResultBottomSheet("Invalid file selected", 0.0, isError: true);
+    return;
+  }
 
-    setState(() {
-      loading = true;
-    });
+  setState(() {
+    loading = true;
+  });
 
-    // Show loader
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const LoadingScreen(
-        animationAsset: 'assets/anim/loading2.json',
-        message: "Analyzing audio...",
-        backgroundColor: secondColor,
-        textColor: textcolor,
-      ),
+
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const LoadingScreen(
+      animationAsset: 'assets/anim/loading2.json',
+      message: "Analyzing audio...",
+      backgroundColor: secondColor,
+      textColor: textcolor,
+    ),
+  );
+
+  try {
+    // --- Send to ML server ---
+    var request = http.MultipartRequest(
+      'POST',
+      Uri.parse("https://etech-rgsx.onrender.com/predict"),
     );
+    request.files.add(await http.MultipartFile.fromPath('file', file.path));
+    var response = await request.send();
+    var respStr = await response.stream.bytesToString();
 
-    try {
-      var request = http.MultipartRequest(
-        'POST',
-        Uri.parse("https://etech-rgsx.onrender.com/predict"),
+    if (response.statusCode == 200) {
+      var data = json.decode(respStr);
+      String prediction = data['prediction'];
+      prediction = prediction[0].toUpperCase() + prediction.substring(1);
+      double confidence = data['confidence'];
+
+      // --- Generate unique filename ---
+      final dateString =
+          "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2,'0')}-${DateTime.now().day.toString().padLeft(2,'0')}";
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final originalName = file.path.split('/').last;
+      final newFileName = "${prediction}_${dateString}_$timestamp.wav";
+
+      // --- Upload to Firebase Storage ---
+      final fileBytes = await file.readAsBytes();
+      final downloadUrl =
+          await _storageService.uploadBytes(fileBytes, newFileName, prediction);
+
+      // --- Save metadata to Firestore ---
+      await _firestoreService.savePrediction(
+        prediction: prediction,
+        confidence: confidence,
+        downloadUrl: downloadUrl,
+        filePath: file.path, // original local file path
       );
 
-      request.files.add(await http.MultipartFile.fromPath('file', file.path));
-      var response = await request.send();
-      var respStr = await response.stream.bytesToString();
-
-      if (response.statusCode == 200) {
-        var data = json.decode(respStr);
-        String prediction = data['prediction'];
-        prediction = prediction[0].toUpperCase() + prediction.substring(1);
-        double confidence = data['confidence'];
-
-        Navigator.pop(context); // close loader
-        _showResultBottomSheet(prediction, confidence);
-      } else {
-        Navigator.pop(context);
-        _showResultBottomSheet("Server Error", 0.0, isError: true);
-      }
-    } catch (e) {
+      Navigator.pop(context); // close loader
+      _showResultBottomSheet(prediction, confidence);
+    } else {
       Navigator.pop(context);
-      _showResultBottomSheet("", 0.0, isError: true);
-    } finally {
-      setState(() {
-        loading = false;
-      });
+      _showResultBottomSheet("Server Error", 0.0, isError: true);
     }
+  } catch (e) {
+    Navigator.pop(context);
+    _showResultBottomSheet("", 0.0, isError: true);
+    print("🔥 Upload error: $e");
+  } finally {
+    setState(() {
+      loading = false;
+    });
   }
+}
 
   @override
   Widget build(BuildContext context) {

@@ -25,7 +25,7 @@ class _MainpageState extends State<Mainpage> {
     FileManagement(),
     RecordPage(),
     GenderPredictorApp(),
-    Upload(),
+    MyRecordingsPage(),
     
   ];
 

@@ -44,7 +44,7 @@ class _FileManagementState extends State<FileManagement> {
       try {
         final files = await Directory(directory.path)
             .list()
-            .where((file) => file.path.toLowerCase().endsWith(".wav") &&
+            .where((file) => file.path.toLowerCase().endsWith(".aac") &&
                 file.path.contains("Undetermined")) // only cleaned WAVs
             .toList();
 
@@ -59,7 +59,76 @@ class _FileManagementState extends State<FileManagement> {
       }
     }
   }
+Future<void> deleteAllRecordings() async {
+  final confirm = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Delete All Recordings'),
+      content: const Text(
+          'Are you sure you want to delete ALL recordings? This cannot be undone.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+        TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete All', style: TextStyle(color: Colors.red))),
+      ],
+    ),
+  );
 
+  if (confirm != true) return;
+
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const LoadingScreen(message: "Deleting all recordings..."),
+  );
+
+  final firestore = FirebaseFirestore.instance;
+  final storage = FirebaseStorage.instance;
+
+  try {
+    // Delete locally
+    for (var file in audioFiles) {
+      final localFile = File(file.path);
+      if (await localFile.exists()) await localFile.delete();
+
+      final fileName = file.uri.pathSegments.last;
+
+      // Delete from Firebase Storage
+      final ref = storage.ref().child('Undetermined Ducklings/$fileName');
+      try {
+        await ref.delete();
+      } on FirebaseException catch (e) {
+        if (e.code != 'object-not-found') print("❌ Firebase Storage deletion error: $e");
+      }
+
+      // Delete from Firestore
+      final snapshot = await firestore
+          .collection("Undetermined")
+          .where("file_name", isEqualTo: fileName)
+          .get();
+
+      for (var doc in snapshot.docs) {
+        await firestore.collection("Undetermined").doc(doc.id).delete();
+      }
+    }
+
+    setState(() {
+      audioFiles.clear();
+      expandedStates.clear();
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('All recordings deleted successfully!')),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Failed to delete all recordings: $e')),
+    );
+  } finally {
+    Navigator.pop(context); 
+  }
+}
   Future<void> deleteAudio(FileSystemEntity file, int index) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -193,6 +262,7 @@ class _FileManagementState extends State<FileManagement> {
   ),
 )
     );
+    
   }
 }
 

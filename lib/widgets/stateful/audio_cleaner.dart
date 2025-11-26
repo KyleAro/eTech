@@ -1,63 +1,63 @@
 import 'dart:io';
 import 'package:ffmpeg_kit_flutter_new_min_gpl/ffmpeg_kit.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:ffmpeg_kit_flutter_new_min_gpl/ffprobe_kit.dart';
 
 class AudioProcessor {
-  /// Convert input audio to WAV mono 16-bit
+
+  /// -----------------------------------------
+  /// 1. FULL PIPELINE (remove dead air → isolate duckling sound)
+  /// -----------------------------------------
+  static Future<String> processAudio(String inputPath) async {
+    print("\n============================");
+    print("🎧 Starting audio processing");
+    print("============================");
+
+    final dir = await getTemporaryDirectory();
+    final ext = inputPath.split('.').last;
+    final outputFile = File(
+      '${dir.path}/processed_${DateTime.now().millisecondsSinceEpoch}.$ext',
+    );
+
+    /// FFmpeg filter chain: dead air removal → duckling isolation
+    final command =
+        '-i "$inputPath" '
+        '-af "silenceremove=start_periods=0:start_threshold=-25dB:start_silence=0.5:'
+        'stop_periods=0:stop_threshold=-25dB:stop_silence=0.5,'
+        'arnndn=model=assets/rnnoise-models/rnnoise.ncnn" '
+        '"${outputFile.path}"';
+
+    print("🔇 Executing pipeline: Dead air removal + Duckling isolation\n$command");
+
+    await FFmpegKit.execute(command);
+
+    if (!await outputFile.exists()) {
+      throw Exception("Audio processing failed");
+    }
+
+    print("🎉 FINAL processed file ready: ${outputFile.path}");
+    return outputFile.path;
+  }
+
+  /// -----------------------------------------
+  /// 2. CONVERT ANY AUDIO TO WAV
+  /// -----------------------------------------
   static Future<String> convertToWav(String inputPath) async {
     final dir = await getTemporaryDirectory();
-    final outputFile = File('${dir.path}/converted_${DateTime.now().millisecondsSinceEpoch}.wav');
+    final outputFile = File(
+      '${dir.path}/converted_${DateTime.now().millisecondsSinceEpoch}.wav',
+    );
 
-    final command = '-i "$inputPath" -ac 1 -ar 16000 -c:a pcm_s16le "${outputFile.path}"';
-    print("Executing FFmpeg command (convert to WAV):\n$command");
+    final command = '-i "$inputPath" -ar 44100 -ac 1 "${outputFile.path}"';
+
+    print("🔊 Converting to WAV\n$command");
+
     await FFmpegKit.execute(command);
 
-    if (!await outputFile.exists()) throw Exception("WAV conversion failed");
+    if (!await outputFile.exists()) {
+      throw Exception("Conversion to WAV failed");
+    }
 
-    print("✅ WAV conversion succeeded: ${outputFile.path}");
-    print("File size: ${await outputFile.length()} bytes");
-
-    // Optional: check duration
-    final session = await FFprobeKit.getMediaInformation(outputFile.path);
-    final info = session.getMediaInformation();
-    print("Duration: ${info?.getDuration()} seconds");
-
+    print("✅ WAV file ready: ${outputFile.path}");
     return outputFile.path;
-  }
-
-  
-  static Future<String> removeDeadAir(String inputPath) async {
-    final dir = await getTemporaryDirectory();
-    final outputFile = File('${dir.path}/deadair_removed_${DateTime.now().millisecondsSinceEpoch}.wav');
-
-    final command =
-        '-i "$inputPath" -af "silenceremove=start_periods=1:start_threshold=-15dB:start_silence=0.5:stop_periods=-1:stop_threshold=-25dB:stop_silence=0.5" "${outputFile.path}"';
-    
-    print("Executing FFmpeg command (remove dead air):\n$command");
-    await FFmpegKit.execute(command);
-
-    if (!await outputFile.exists()) throw Exception("Dead air removal failed");
-
-    print("✅ Dead air removal succeeded: ${outputFile.path}");
-    print("File size: ${await outputFile.length()} bytes");
-
-    // Optional: check duration
-    final session = await FFprobeKit.getMediaInformation(outputFile.path);
-    final info = session.getMediaInformation();
-    print("Duration after dead air removal: ${info?.getDuration()} seconds");
-
-    return outputFile.path;
-  }
-
-  /// Full preprocessing workflow: convert -> remove dead air
-  static Future<String> process(String inputPath) async {
-    print("🔹 Starting preprocessing for: $inputPath");
-
-    String wavFile = await convertToWav(inputPath);
-    String cleanedFile = await removeDeadAir(wavFile);
-
-    print("🔹 Preprocessing complete. Output file: $cleanedFile");
-    return cleanedFile;
   }
 }
