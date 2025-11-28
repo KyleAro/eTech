@@ -444,353 +444,385 @@ class _RecordPageState extends State<RecordPage> {
     }
   }
 
- void _showRecordingBottomSheet() {
-  bool showExtraButtons = false;
-  final audioPlayerService = AudioPlayerService();
+  void _showRecordingBottomSheet() {
+    bool showExtraButtons = false;
+    final audioPlayerService = AudioPlayerService();
 
-  showModalBottomSheet(
-    context: context,
-    isDismissible: false,
-    enableDrag: false,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (context) => WillPopScope(
-      onWillPop: () async => !isPredicting,
-      child: StatefulBuilder(
-        builder: (context, setModalState) {
+    showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => WillPopScope(
+        onWillPop: () async => !isPredicting,
+        child: StatefulBuilder(builder: (context, setModalState) {
           return Theme(
             data: ThemeData(
               useMaterial3: true,
-              colorScheme: const ColorScheme.dark(
-                primary: Color(0xFFFFD54F),
-                secondary: Color(0xFFFFD54F),
-                surface: Color(0xFF1E1E1E),
-                background: Color(0xFF121212),
+              colorScheme: ColorScheme.dark(
+                primary: const Color(0xFFFFD54F),
+                secondary: const Color(0xFFFFD54F),
+                surface: const Color(0xFF1E1E1E),
+                background: const Color(0xFF121212),
               ),
             ),
-            child: Stack(
-              children: [
-                Container(
-                  height: MediaQuery.of(context).size.height * 0.75,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF1E1E1E),
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-                  ),
-                  child: Column(
-                    children: [
-                      // Drag handle
-                      Center(
-                        child: Container(
-                          width: 40,
-                          height: 4,
-                          margin: const EdgeInsets.only(top: 12, bottom: 20),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[700],
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
+            child: Container(
+              height: MediaQuery.of(context).size.height * 0.75,
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E1E1E),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              ),
+              child: Column(
+                children: [
+                  // Drag handle
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(top: 12, bottom: 20),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[700],
+                        borderRadius: BorderRadius.circular(2),
                       ),
+                    ),
+                  ),
 
-                      Expanded(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
-                          child: Column(
-                            children: [
-                              const SizedBox(height: 20),
-
-                              // Recording indicator
-                              if (!showExtraButtons) ...[
-                                Container(
-                                  padding: const EdgeInsets.all(20),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red[900]?.withOpacity(0.2),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Container(
-                                    width: 16,
-                                    height: 16,
-                                    decoration: BoxDecoration(
-                                      color: Colors.red[400],
-                                      shape: BoxShape.circle,
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.red[400]!.withOpacity(0.5),
-                                          blurRadius: 12,
-                                          spreadRadius: 4,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  'Recording...',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.white70,
-                                  ),
-                                ),
-                                const SizedBox(height: 24),
-                              ],
-
-                              // Timer
-                              StreamBuilder<RecordingDisposition>(
-                                stream: recorder.onProgress,
-                                builder: (context, snapshot) {
-                                  final duration = snapshot.hasData
-                                      ? snapshot.data!.duration
-                                      : Duration.zero;
-                                  final minutes = duration.inMinutes
-                                      .toString()
-                                      .padLeft(2, '0');
-                                  final seconds =
-                                      (duration.inSeconds % 60).toString().padLeft(2, '0');
-
-                                  return Card(
-                                    elevation: 4,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 40, vertical: 24),
-                                      child: Text(
-                                        '$minutes:$seconds',
-                                        style: TextStyle(
-                                          fontSize: 56,
-                                          fontWeight: FontWeight.bold,
-                                          color: showExtraButtons
-                                              ? Colors.white
-                                              : Colors.red[400],
-                                          letterSpacing: 4,
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                },
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Column(
+                        children: [
+                          // File name editor (show after recording)
+                          if (showExtraButtons) ...[
+                            Card(
+                              elevation: 2,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
                               ),
-
-                              const SizedBox(height: 32),
-
-                              // Stop button
-                              if (!showExtraButtons)
-                                SizedBox(
-                                  width: 80,
-                                  height: 80,
-                                  child: FilledButton(
-                                    onPressed: () async {
-                                      await stopRecording();
-                                      try {
-                                        wavPath = await AudioProcessor.convertToWav(rawAacPath!);
-                                      } catch (_) {
-                                        wavPath = rawAacPath;
-                                      }
-                                      setModalState(() => showExtraButtons = true);
-                                    },
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: Colors.red[400],
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(16),
-                                      ),
-                                      padding: EdgeInsets.zero,
-                                    ),
-                                    child: const Icon(
-                                      Icons.stop,
-                                      size: 36,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-
-                              // Audio player
-                              if (showExtraButtons && wavPath != null) ...[
-                                const SizedBox(height: 24),
-                                Card(
-                                  elevation: 4,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(20),
-                                    child: AudioPlayerControls(
-                                      audioPlayer: audioPlayerService,
-                                      filePath: wavPath!,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 24),
-                              ],
-
-                              // Action buttons
-                              if (showExtraButtons)
-                                Column(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Row(
                                   children: [
-                                    // Predict & Save
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: FilledButton.icon(
-                                        onPressed: (rawAacPath == null || isPredicting)
-                                            ? null
-                                            : () async {
-                                                setState(() => isPredicting = true);
-                                                Navigator.pop(context);
-                                                final predictionData =
-                                                    await _sendToMLServer(rawAacPath!);
-                                                await _handlePredictionComplete(
-                                                  context: context,
-                                                  predictionData: predictionData,
-                                                  autoSave: true,
-                                                );
-                                                setState(() => isPredicting = false);
-                                              },
-                                        icon: isPredicting
-                                            ? const SizedBox(
-                                                width: 20,
-                                                height: 20,
-                                                child: CircularProgressIndicator(
-                                                  strokeWidth: 2.5,
-                                                  color: Colors.white,
-                                                ),
-                                              )
-                                            : const Icon(Icons.cloud_upload),
-                                        label: Text(
-                                            isPredicting ? 'Processing...' : 'Predict & Save'),
-                                        style: FilledButton.styleFrom(
-                                          backgroundColor: Colors.green[600],
-                                          foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(vertical: 16),
-                                        ),
-                                      ),
+                                    Icon(
+                                      Icons.edit,
+                                      color: const Color(0xFFFFD54F),
+                                      size: 24,
                                     ),
-                                    const SizedBox(height: 12),
-
-                                    // Predict only
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: OutlinedButton.icon(
-                                        onPressed: (rawAacPath == null || isPredicting)
-                                            ? null
-                                            : () async {
-                                                setState(() => isPredicting = true);
-                                                Navigator.pop(context);
-                                                final predictionData =
-                                                    await _sendToMLServer(rawAacPath!);
-                                                await _handlePredictionComplete(
-                                                  context: context,
-                                                  predictionData: predictionData,
-                                                  autoSave: false,
-                                                );
-                                                setState(() => isPredicting = false);
-                                              },
-                                        icon: const Icon(Icons.psychology),
-                                        label: const Text('Predict Only'),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: Color(0xFFFFD54F),
-                                          side: const BorderSide(color: Color(0xFFFFD54F)),
-                                          padding: const EdgeInsets.symmetric(vertical: 16),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: titleController,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
                                         ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 12),
-
-                                    // Save Undetermined
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: OutlinedButton.icon(
-                                        onPressed: isPredicting
-                                            ? null
-                                            : () async {
-                                                Navigator.pop(context);
-                                                await _saveWithoutPrediction();
-                                              },
-                                        icon: const Icon(Icons.save_outlined),
-                                        label: const Text('Save as Undetermined'),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: Colors.grey[400],
-                                          side: BorderSide(color: Colors.grey[700]!),
-                                          padding: const EdgeInsets.symmetric(vertical: 16),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 12),
-
-                                    // Discard
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: OutlinedButton.icon(
-                                        onPressed: isPredicting
-                                            ? null
-                                            : () async {
-                                                await stopRecording(discard: true);
-                                                Navigator.pop(context);
-                                              },
-                                        icon: const Icon(Icons.delete_outline),
-                                        label: const Text('Discard Recording'),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: Colors.red[400],
-                                          side: BorderSide(color: Colors.red[400]!),
-                                          padding: const EdgeInsets.symmetric(vertical: 16),
+                                        decoration: InputDecoration(
+                                          hintText: 'Edit file name (optional)',
+                                          border: InputBorder.none,
+                                          isDense: true,
+                                          hintStyle: TextStyle(
+                                            color: Colors.grey[600],
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ],
                                 ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                          ],
 
-                // ------------------------
-                // 🔥 LOADING OVERLAY HERE
-                // ------------------------
-                if (isPredicting)
-                  Positioned.fill(
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        color: Colors.black87,
-                        borderRadius:
-                            BorderRadius.vertical(top: Radius.circular(28)),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const CircularProgressIndicator(
-                            color: Color(0xFFFFD54F),
-                            strokeWidth: 3,
-                          ),
-                          const SizedBox(height: 24),
-                          const Text(
-                            'Analyzing audio...',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w600,
+                          // Recording indicator
+                          if (!showExtraButtons) ...[
+                            Container(
+                              padding: const EdgeInsets.all(20),
+                              decoration: BoxDecoration(
+                                color: Colors.red[900]?.withOpacity(0.2),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Container(
+                                width: 16,
+                                height: 16,
+                                decoration: BoxDecoration(
+                                  color: Colors.red[400],
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.red[400]!.withOpacity(0.5),
+                                      blurRadius: 12,
+                                      spreadRadius: 4,
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'Please wait',
-                            style: TextStyle(
-                              color: Colors.grey[400],
-                              fontSize: 14,
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Recording...',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white70,
+                              ),
                             ),
+                            const SizedBox(height: 24),
+                          ],
+
+                          // Timer display
+                          StreamBuilder<RecordingDisposition>(
+                            stream: recorder.onProgress,
+                            builder: (context, snapshot) {
+                              final duration = snapshot.hasData
+                                  ? snapshot.data!.duration
+                                  : Duration.zero;
+                              final minutes = duration.inMinutes.toString().padLeft(2, '0');
+                              final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
+                              
+                              return Card(
+                                elevation: 4,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 40,
+                                    vertical: 24,
+                                  ),
+                                  child: Text(
+                                    '$minutes:$seconds',
+                                    style: TextStyle(
+                                      fontSize: 56,
+                                      fontWeight: FontWeight.bold,
+                                      color: showExtraButtons
+                                          ? Colors.white
+                                          : Colors.red[400],
+                                      letterSpacing: 4,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
                           ),
+
+                          const SizedBox(height: 32),
+
+                          // Stop button (when recording)
+                          if (!showExtraButtons)
+                            SizedBox(
+                              width: 80,
+                              height: 80,
+                              child: FilledButton(
+                                onPressed: () async {
+                                  await stopRecording();
+                                  try {
+                                    wavPath = await AudioProcessor.convertToWav(rawAacPath!);
+                                  } catch (_) {
+                                    wavPath = rawAacPath;
+                                  }
+                                  setModalState(() => showExtraButtons = true);
+                                },
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: Colors.red[400],
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  padding: EdgeInsets.zero,
+                                ),
+                                child: const Icon(
+                                  Icons.stop,
+                                  size: 36,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+
+                          // Audio player (after recording)
+                          if (showExtraButtons && wavPath != null) ...[
+                            Card(
+                              elevation: 4,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(20),
+                                child: AudioPlayerControls(
+                                  audioPlayer: audioPlayerService,
+                                  filePath: wavPath!,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                          ],
+
+                          // Action buttons (after recording)
+                          if (showExtraButtons)
+                            Column(
+                              children: [
+                                // Predict & Auto-Save button
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: FilledButton.icon(
+                                    onPressed: (rawAacPath == null || isPredicting)
+                                        ? null
+                                        : () async {
+                                            print('🔘 DEBUG: Predict & Save button pressed');
+                                            setState(() => isPredicting = true);
+                                            
+                                            try {
+                                              print('📱 DEBUG: Closing recording bottom sheet');
+                                              Navigator.pop(context); // Close recording sheet
+                                              
+                                              print('🔄 DEBUG: Calling _sendToMLServer');
+                                              final predictionData = await _sendToMLServer(rawAacPath!);
+                                              
+                                              print('✅ DEBUG: Got prediction data, calling _handlePredictionComplete');
+                                              await _handlePredictionComplete(
+                                                context: context,
+                                                predictionData: predictionData,
+                                                autoSave: true, // Auto-save enabled
+                                              );
+                                              
+                                              print('🎉 DEBUG: _handlePredictionComplete finished');
+                                            } catch (e, stackTrace) {
+                                              print('❌ DEBUG: Error in Predict & Save: $e');
+                                              print('📚 DEBUG: Stack trace: $stackTrace');
+                                              
+                                              ResultBottomSheet.show(
+                                                context,
+                                                prediction: "Prediction failed: $e",
+                                                confidence: 0.0,
+                                                isError: true,
+                                              );
+                                            } finally {
+                                              setState(() => isPredicting = false);
+                                            }
+                                          },
+                                    icon: isPredicting
+                                        ? const SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2.5,
+                                              color: Colors.white,
+                                            ),
+                                          )
+                                        : const Icon(Icons.cloud_upload),
+                                    label: Text(isPredicting ? 'Processing...' : 'Predict & Save'),
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: Colors.green[600],
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 16),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                
+                                // Predict Only (no save)
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton.icon(
+                                    onPressed: (rawAacPath == null || isPredicting)
+                                        ? null
+                                        : () async {
+                                            print('🔘 DEBUG: Predict Only button pressed');
+                                            setState(() => isPredicting = true);
+                                            
+                                            try {
+                                              print('📱 DEBUG: Closing recording bottom sheet');
+                                              Navigator.pop(context);
+                                              
+                                              print('🔄 DEBUG: Calling _sendToMLServer');
+                                              final predictionData = await _sendToMLServer(rawAacPath!);
+
+                                              print('✅ DEBUG: Got prediction data, calling _handlePredictionComplete (no save)');
+                                              await _handlePredictionComplete(
+                                                context: context,
+                                                predictionData: predictionData,
+                                                autoSave: false, // No auto-save
+                                              );
+                                              
+                                              print('🎉 DEBUG: _handlePredictionComplete finished');
+                                            } catch (e, stackTrace) {
+                                              print('❌ DEBUG: Error in Predict Only: $e');
+                                              print('📚 DEBUG: Stack trace: $stackTrace');
+                                              
+                                              ResultBottomSheet.show(
+                                                context,
+                                                prediction: "Prediction failed: $e",
+                                                confidence: 0.0,
+                                                isError: true,
+                                              );
+                                            } finally {
+                                              setState(() => isPredicting = false);
+                                            }
+                                          },
+                                    icon: const Icon(Icons.psychology),
+                                    label: const Text('Predict Only'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFFFFD54F),
+                                      side: const BorderSide(color: Color(0xFFFFD54F)),
+                                      padding: const EdgeInsets.symmetric(vertical: 16),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                
+                                // Save without prediction (Undetermined)
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton.icon(
+                                    onPressed: isPredicting
+                                        ? null
+                                        : () async {
+                                            Navigator.pop(context);
+                                            await _saveWithoutPrediction();
+                                          },
+                                    icon: const Icon(Icons.save_outlined),
+                                    label: const Text('Save as Undetermined'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.grey[400],
+                                      side: BorderSide(color: Colors.grey[700]!),
+                                      padding: const EdgeInsets.symmetric(vertical: 16),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                
+                                // Discard button
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton.icon(
+                                    onPressed: isPredicting
+                                        ? null
+                                        : () async {
+                                            await stopRecording(discard: true);
+                                            Navigator.pop(context);
+                                          },
+                                    icon: const Icon(Icons.delete_outline),
+                                    label: const Text('Discard Recording'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.red[400],
+                                      side: BorderSide(color: Colors.red[400]!),
+                                      padding: const EdgeInsets.symmetric(vertical: 16),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                         ],
                       ),
                     ),
                   ),
-              ],
+                ],
+              ),
             ),
           );
-        },
+        }),
       ),
-    ),
-  );
-}
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
