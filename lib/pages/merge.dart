@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:etech/pages/MainPage.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -11,8 +10,8 @@ import 'package:path_provider/path_provider.dart';
 import '../database/firebase_con.dart';
 import '../database/firestore_con.dart';
 import '../widgets/stateless/loading_screen.dart';
-import 'package:lottie/lottie.dart';
 import '../widgets/stateless/result_botsheet.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,6 +34,10 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
   final FirebaseConnect _storageService = FirebaseConnect();
   final FirestoreConnect _firestoreService = FirestoreConnect();
 
+  // API Configuration
+  static const String API_BASE_URL = "https://etech-rgsx.onrender.com";
+  static const Duration REQUEST_TIMEOUT = Duration(seconds: 90);
+
   @override
   void initState() {
     super.initState();
@@ -54,21 +57,44 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
 
   Future<void> wakeUpServer() async {
     try {
-      var response = await http.get(Uri.parse("https://etech-rgsx.onrender.com/status"));
+      var response = await http
+          .get(Uri.parse("$API_BASE_URL/status"))
+          .timeout(const Duration(seconds: 10));
+      
       if (response.statusCode == 200) {
-        setState(() => serverReady = true);
-        print("✅ Server is active and ready to predict");
+        var data = json.decode(response.body);
+        bool isReady = data['status'] == 'ready';
+        
+        if (mounted) {
+          setState(() => serverReady = isReady);
+        }
+        
+        if (isReady) {
+          print("✅ Server is active and ready to predict");
+        } else {
+          print("⚠️ Server is warming up...");
+        }
       } else {
-        setState(() => serverReady = false);
-        print("⚠️ Server responded but not ready: ${response.statusCode}");
+        if (mounted) {
+          setState(() => serverReady = false);
+        }
+        print("⚠️ Server responded with status: ${response.statusCode}");
       }
     } catch (e) {
-      setState(() => serverReady = false);
+      if (mounted) {
+        setState(() => serverReady = false);
+      }
       print("❌ Server is sleeping or unreachable: $e");
     }
   }
 
   Future<void> _pickAndSendFile() async {
+    // Check if server is ready
+    if (!serverReady) {
+      _showErrorSnackBar('Server is still warming up. Please wait a moment.');
+      return;
+    }
+
     FilePickerResult? resultPicker =
         await FilePicker.platform.pickFiles(type: FileType.audio);
 
@@ -77,6 +103,7 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
     File? file;
     final pickedFile = resultPicker.files.single;
 
+    // Handle file path for different platforms
     if (pickedFile.path != null) {
       file = File(pickedFile.path!);
     } else if (pickedFile.bytes != null) {
@@ -85,17 +112,24 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
       await tempFile.writeAsBytes(pickedFile.bytes!);
       file = tempFile;
     } else {
-      ResultBottomSheet.show(
-        context,
-        prediction: "Invalid file selected",
-        confidence: 0.0,
-        isError: true,
-      );
+      _showErrorDialog('Invalid file selected', 'Please select a valid audio file.');
+      return;
+    }
+
+    // Validate file size (optional - e.g., 50MB max)
+    final fileSize = await file.length();
+    if (fileSize == 0) {
+      _showErrorDialog('Empty File', 'The selected file is empty.');
+      return;
+    }
+    if (fileSize > 50 * 1024 * 1024) {
+      _showErrorDialog('File Too Large', 'Please select a file smaller than 50MB.');
       return;
     }
 
     setState(() => loading = true);
 
+    // Show loading dialog
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -108,147 +142,256 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
     );
 
     try {
+      // Prepare multipart request
       var request = http.MultipartRequest(
         'POST',
-        Uri.parse("https://etech-rgsx.onrender.com/predict"),
+        Uri.parse("$API_BASE_URL/predict"),
       );
+      
       request.files.add(await http.MultipartFile.fromPath('file', file.path));
-      var response = await request.send();
-      var respStr = await response.stream.bytesToString();
-
-      print("🔥 DEBUG - Response Status: ${response.statusCode}");
-      print("🔥 DEBUG - Raw Response Body:");
-      print(respStr);
-      print("=" * 80);
+      
+      // Send request with timeout
+      var streamedResponse = await request.send().timeout(
+        REQUEST_TIMEOUT,
+        onTimeout: () {
+          throw TimeoutException('Upload timed out after ${REQUEST_TIMEOUT.inSeconds} seconds');
+        },
+      );
+      
+      var response = await http.Response.fromStream(streamedResponse);
+      
+      print("📡 Response Status: ${response.statusCode}");
+      print("📡 Response Body: ${response.body}");
 
       if (response.statusCode == 200) {
-        var data = json.decode(respStr);
-        
-        print("🔥 DEBUG - Decoded JSON:");
-        print("   Full data: $data");
-        print("   Data type: ${data.runtimeType}");
-        print("=" * 80);
-        
-        print("🔥 DEBUG - Individual Fields:");
-        print("   status: ${data['status']}");
-        print("   final_prediction: ${data['final_prediction']} (type: ${data['final_prediction']?.runtimeType})");
-        print("   average_confidence: ${data['average_confidence']} (type: ${data['average_confidence']?.runtimeType})");
-        print("   total_clips: ${data['total_clips']} (type: ${data['total_clips']?.runtimeType})");
-        print("   male_clips: ${data['male_clips']} (type: ${data['male_clips']?.runtimeType})");
-        print("   female_clips: ${data['female_clips']} (type: ${data['female_clips']?.runtimeType})");
-        print("   prediction_summary length: ${data['prediction_summary']?.length}");
-        print("=" * 80);
-        
-        // Check if response has error status
-        if (data['status'] == 'error') {
-          Navigator.pop(context);
-          ResultBottomSheet.show(
-            context,
-            prediction: data['message'] ?? "Server error",
-            confidence: 0.0,
-            isError: true,
-          );
-          return;
-        }
-        
-        // Parse prediction (handle lowercase from model)
-        String prediction = (data['final_prediction'] ?? 'unknown').toString().toLowerCase();
-        print("🔥 DEBUG - Raw prediction: $prediction");
-        
-        // Capitalize first letter
-        if (prediction.isNotEmpty && prediction != 'unknown') {
-          prediction = prediction[0].toUpperCase() + prediction.substring(1).toLowerCase();
+        await _handleSuccessResponse(response.body, file, pickedFile.name);
+      } else if (response.statusCode == 503) {
+        Navigator.pop(context);
+        _showErrorDialog('Server Busy', 'The server is still warming up. Please try again in a moment.');
+      } else {
+        Navigator.pop(context);
+        var errorMsg = 'Server Error: ${response.statusCode}';
+        try {
+          var errorData = json.decode(response.body);
+          errorMsg = errorData['message'] ?? errorMsg;
+        } catch (_) {}
+        _showErrorDialog('Prediction Failed', errorMsg);
+      }
+    } on TimeoutException catch (e) {
+      print("⏱️ Timeout: $e");
+      Navigator.pop(context);
+      _showErrorDialog('Request Timeout', 'The request took too long. Please try again with a shorter audio file.');
+    } on SocketException catch (e) {
+      print("🌐 Network Error: $e");
+      Navigator.pop(context);
+      _showErrorDialog('Network Error', 'Please check your internet connection and try again.');
+    } catch (e) {
+      print("❌ Error: $e");
+      Navigator.pop(context);
+      _showErrorDialog('Upload Failed', 'An unexpected error occurred: ${e.toString()}');
+    } finally {
+      if (mounted) {
+        setState(() => loading = false);
+      }
+    }
+  }
+
+  Future<void> _handleSuccessResponse(String responseBody, File file, String originalFileName) async {
+    try {
+      var data = json.decode(responseBody);
+      
+      // Check for error status in response
+      if (data['status'] == 'error') {
+        Navigator.pop(context);
+        _showErrorDialog('Prediction Error', data['message'] ?? 'Unknown error occurred');
+        return;
+      }
+
+      // Parse prediction (should already be Title Case from API)
+      String prediction = (data['final_prediction'] ?? 'Unknown').toString().trim();
+      
+      // Validate prediction
+      if (prediction != 'Male' && prediction != 'Female') {
+        print("⚠️ Unexpected prediction value: $prediction");
+        // Normalize just in case
+        if (prediction.toLowerCase() == 'male') {
+          prediction = 'Male';
+        } else if (prediction.toLowerCase() == 'female') {
+          prediction = 'Female';
         } else {
           prediction = 'Unknown';
         }
-        
-        // Parse confidence (handle int or double)
-        double confidence = 0.0;
-        var confValue = data['average_confidence'];
-        if (confValue != null) {
-          confidence = (confValue is int) ? confValue.toDouble() : (confValue as num).toDouble();
-        }
-        
-        int totalClips = (data['total_clips'] ?? 0) as int;
-        int maleClips = (data['male_clips'] ?? 0) as int;
-        int femaleClips = (data['female_clips'] ?? 0) as int;
-        List<dynamic> clipResults = data['prediction_summary'] ?? [];
-
-        print("🔥 DEBUG - Final values:");
-        print("   Prediction: $prediction");
-        print("   Confidence: $confidence");
-        print("   Total Clips: $totalClips");
-        print("   Male Clips: $maleClips");
-        print("   Female Clips: $femaleClips");
-        print("   Clip Results count: ${clipResults.length}");
-
-        final dateString =
-            "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}";
-        final timestamp = DateTime.now().millisecondsSinceEpoch;
-        final originalName = pickedFile.name.split('.').first;
-        final newFileName = "${prediction}_${originalName}_${dateString}_$timestamp.wav";
-
-        final fileBytes = await file.readAsBytes();
-        
-        // Upload to gender-specific folder
-        final downloadUrl = await _storageService.uploadBytes(
-          fileBytes,
-          newFileName,
-          prediction,
-        );
-
-        await _firestoreService.savePrediction(
-          prediction: prediction,
-          confidence: confidence,
-          downloadUrl: downloadUrl,
-          filePath: file.path,
-        );
-
-        Navigator.pop(context); // Close loading dialog
-
-        // Show success snackbar
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Saved to $prediction folder'),
-            backgroundColor: Colors.green[700],
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-
-        // Show result with ALL data
-        ResultBottomSheet.show(
-          context,
-          prediction: prediction,
-          confidence: confidence,
-          rawBytes: fileBytes,
-          baseName: newFileName,
-          totalClips: totalClips,
-          maleClips: maleClips,
-          femaleClips: femaleClips,
-          clipResults: clipResults,
-          showConfetti: true,
-        );
-      } else {
-        Navigator.pop(context);
-        ResultBottomSheet.show(
-          context,
-          prediction: "Server Error: ${response.statusCode}",
-          confidence: 0.0,
-          isError: true,
-        );
       }
-    } catch (e) {
-      print("🔥 ERROR: $e");
-      Navigator.pop(context);
+      
+      // Parse numeric values with safe type conversion
+      double confidence = _parseDouble(data['average_confidence'], 0.0);
+      int totalClips = _parseInt(data['total_clips'], 0);
+      int maleClips = _parseInt(data['male_clips'], 0);
+      int femaleClips = _parseInt(data['female_clips'], 0);
+      List<dynamic> clipResults = data['prediction_summary'] ?? [];
+
+      print("✅ Parsed Results:");
+      print("   Prediction: $prediction");
+      print("   Confidence: $confidence%");
+      print("   Total Clips: $totalClips");
+      print("   Male Clips: $maleClips");
+      print("   Female Clips: $femaleClips");
+      print("   Clip Results: ${clipResults.length}");
+
+      // Generate new filename
+      final dateString =
+          "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}";
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final originalName = originalFileName.split('.').first;
+      final newFileName = "${prediction}_${originalName}_${dateString}_$timestamp.wav";
+
+      // Read file bytes
+      final fileBytes = await file.readAsBytes();
+      
+      // === SAVE LOCALLY ===
+      await _saveLocalFile(fileBytes, newFileName, prediction, confidence, totalClips, maleClips, femaleClips, clipResults);
+      
+      // Upload to gender-specific folder in Firebase
+      final downloadUrl = await _storageService.uploadBytes(
+        fileBytes,
+        newFileName,
+        prediction,
+      );
+
+      // Save to Firestore
+      await _firestoreService.savePrediction(
+        prediction: prediction,
+        confidence: confidence,
+        downloadUrl: downloadUrl,
+        filePath: file.path,
+      );
+
+      Navigator.pop(context); // Close loading dialog
+
+      // Show success notification
+      _showSuccessSnackBar('Saved to $prediction folder and local storage');
+
+      // Show result bottom sheet
       ResultBottomSheet.show(
         context,
-        prediction: "Upload failed: $e",
-        confidence: 0.0,
-        isError: true,
+        prediction: prediction,
+        confidence: confidence,
+        rawBytes: fileBytes,
+        baseName: newFileName,
+        totalClips: totalClips,
+        maleClips: maleClips,
+        femaleClips: femaleClips,
+        clipResults: clipResults,
+        showConfetti: true,
       );
-    } finally {
-      setState(() => loading = false);
+    } catch (e) {
+      print("❌ Error parsing response: $e");
+      Navigator.pop(context);
+      _showErrorDialog('Parse Error', 'Failed to process server response: ${e.toString()}');
     }
+  }
+
+  // === NEW: SAVE FILE LOCALLY WITH METADATA ===
+  Future<void> _saveLocalFile(
+    List<int> fileBytes,
+    String fileName,
+    String prediction,
+    double confidence,
+    int totalClips,
+    int maleClips,
+    int femaleClips,
+    List<dynamic> clipResults,
+  ) async {
+    try {
+      // Get external storage directory
+      final directory = await getExternalStorageDirectory();
+      if (directory == null) {
+        print("⚠️ External storage not available");
+        return;
+      }
+
+      // Save audio file
+      final audioFile = File('${directory.path}/$fileName');
+      await audioFile.writeAsBytes(fileBytes);
+      print("✅ Saved audio file locally: ${audioFile.path}");
+
+      // Save metadata to Firestore (local collection)
+      final firestore = FirebaseFirestore.instance;
+      await firestore.collection('LocalPredictions').add({
+        'file_name': fileName,
+        'prediction': prediction,
+        'confidence': confidence,
+        'total_clips': totalClips,
+        'male_clips': maleClips,
+        'female_clips': femaleClips,
+        'clip_results': clipResults.map((clip) => {
+          'clip': clip['clip'],
+          'prediction': clip['prediction'],
+          'confidence': clip['confidence'],
+        }).toList(),
+        'local_path': audioFile.path,
+        'created_at': FieldValue.serverTimestamp(),
+      });
+      
+      print("✅ Saved metadata to Firestore");
+    } catch (e) {
+      print("❌ Error saving local file: $e");
+      // Don't throw - allow the upload to continue even if local save fails
+    }
+  }
+
+  // Safe parsing helpers
+  double _parseDouble(dynamic value, double defaultValue) {
+    if (value == null) return defaultValue;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? defaultValue;
+    return defaultValue;
+  }
+
+  int _parseInt(dynamic value, int defaultValue) {
+    if (value == null) return defaultValue;
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? defaultValue;
+    return defaultValue;
+  }
+
+  // UI Helper Methods
+  void _showErrorDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red[700],
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _showSuccessSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green[700],
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   @override
@@ -286,11 +429,11 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
                 duration: const Duration(milliseconds: 300),
                 child: Chip(
                   avatar: CircleAvatar(
-                    backgroundColor: serverReady ? Colors.green : Colors.red,
+                    backgroundColor: serverReady ? Colors.green : Colors.orange,
                     radius: 6,
                   ),
                   label: Text(
-                    serverReady ? 'Server Ready' : 'Server Sleeping',
+                    serverReady ? 'Server Ready' : 'Server Warming Up',
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -316,7 +459,7 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
                           borderRadius: BorderRadius.circular(24),
                         ),
                         child: InkWell(
-                          onTap: loading ? null : _pickAndSendFile,
+                          onTap: (loading || !serverReady) ? null : _pickAndSendFile,
                           borderRadius: BorderRadius.circular(24),
                           child: Container(
                             width: double.infinity,
@@ -330,10 +473,12 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
                                     color: const Color(0xFFFFD54F).withOpacity(0.15),
                                     shape: BoxShape.circle,
                                   ),
-                                  child: const Icon(
+                                  child: Icon(
                                     Icons.cloud_upload_outlined,
                                     size: 80,
-                                    color: Color(0xFFFFD54F),
+                                    color: (loading || !serverReady) 
+                                        ? Colors.grey 
+                                        : const Color(0xFFFFD54F),
                                   ),
                                 ),
                                 const SizedBox(height: 24),
@@ -346,7 +491,9 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
-                                  'Upload will automatically save to the correct folder',
+                                  serverReady 
+                                      ? 'Upload will save to Firebase and local storage'
+                                      : 'Waiting for server to be ready...',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     fontSize: 14,
@@ -355,9 +502,9 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
                                 ),
                                 const SizedBox(height: 24),
                                 FilledButton.icon(
-                                  onPressed: loading ? null : _pickAndSendFile,
+                                  onPressed: (loading || !serverReady) ? null : _pickAndSendFile,
                                   icon: const Icon(Icons.folder_open),
-                                  label: const Text('Browse Files'),
+                                  label: Text(loading ? 'Processing...' : 'Browse Files'),
                                   style: FilledButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 32,
@@ -388,7 +535,7 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
                             child: _buildInfoCard(
                               icon: Icons.cloud_done,
                               title: 'Auto Save',
-                              subtitle: 'Male/Female folders',
+                              subtitle: 'Cloud + Local',
                             ),
                           ),
                         ],
@@ -406,9 +553,9 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
                           padding: const EdgeInsets.all(16),
                           child: Row(
                             children: [
-                              Icon(
+                              const Icon(
                                 Icons.info_outline,
-                                color: const Color(0xFFFFD54F),
+                                color: Color(0xFFFFD54F),
                                 size: 24,
                               ),
                               const SizedBox(width: 12),
@@ -425,7 +572,7 @@ class _GenderPredictorAppState extends State<GenderPredictorApp> {
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      'Files are predicted, renamed, and saved automatically',
+                                      'Files are analyzed and saved with prediction data',
                                       style: TextStyle(
                                         fontSize: 12,
                                         color: Colors.grey[400],
