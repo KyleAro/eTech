@@ -1,7 +1,13 @@
 import 'dart:async';
 import 'package:etech/pages/MainPage.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:etech/style/mainpage_style.dart';
+
+// =============================================================================
+// AUDIO PLAYER SERVICE — unchanged. Pure logic, no UI.
+// =============================================================================
 
 class AudioPlayerService {
   final AudioPlayer _player = AudioPlayer();
@@ -112,7 +118,11 @@ class AudioPlayerService {
   }
 }
 
-/// Reusable widget for Slider + Player Controls
+// =============================================================================
+// AUDIO PLAYER CONTROLS — pond & ripples styling.
+// Designed to sit inside a NeuBox or directly on the pond gradient.
+// =============================================================================
+
 class AudioPlayerControls extends StatelessWidget {
   final AudioPlayerService audioPlayer;
   final String filePath;
@@ -129,67 +139,179 @@ class AudioPlayerControls extends StatelessWidget {
       stream: audioPlayer.onUpdate,
       builder: (context, snapshot) {
         final isCurrent = audioPlayer.currentlyPlaying == filePath;
-        final totalSeconds = audioPlayer.totalDuration?.inSeconds.toDouble() ?? 1;
+        final totalSeconds =
+            audioPlayer.totalDuration?.inSeconds.toDouble() ?? 1;
         final currentSeconds = isCurrent
-    ? audioPlayer.currentPosition.inSeconds.toDouble().clamp(0.0, totalSeconds)
-    : 0.0;
-
+            ? audioPlayer.currentPosition.inSeconds
+                .toDouble()
+                .clamp(0.0, totalSeconds)
+            : 0.0;
+        final isPlaying = isCurrent && !audioPlayer.isPaused;
 
         return Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Slider(
-              min: 0,
-              max: totalSeconds,
-              value: currentSeconds,
-              activeColor: secondColor,
-              inactiveColor: const Color.fromARGB(94, 255, 255, 255),
-              onChanged: (value) {
-                if (isCurrent) audioPlayer.seek(Duration(seconds: value.toInt()));
-              },
+            // Slider — pond palette
+            SliderTheme(
+              data: SliderThemeData(
+                trackHeight: 3,
+                thumbShape:
+                    const RoundSliderThumbShape(enabledThumbRadius: 7),
+                overlayShape:
+                    const RoundSliderOverlayShape(overlayRadius: 16),
+                activeTrackColor: secondColor,
+                inactiveTrackColor: textcolor.withValues(alpha: 0.15),
+                thumbColor: ducklingYellowDark,
+                overlayColor: secondColor.withValues(alpha: 0.2),
+              ),
+              child: Slider(
+                min: 0,
+                max: totalSeconds,
+                value: currentSeconds,
+                onChanged: (value) {
+                  if (isCurrent) {
+                    audioPlayer.seek(Duration(seconds: value.toInt()));
+                  }
+                },
+              ),
             ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  isCurrent ? audioPlayer.formatDuration(audioPlayer.currentPosition) : "00:00",
-                  style: const TextStyle(color: Colors.white70),
-                ),
-                Text(
-                  isCurrent ? audioPlayer.formatDuration(audioPlayer.totalDuration ?? Duration.zero) : "00:00",
-                  style: const TextStyle(color: Colors.white70),
-                ),
-              ],
+
+            // Time labels
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    isCurrent
+                        ? audioPlayer
+                            .formatDuration(audioPlayer.currentPosition)
+                        : "00:00",
+                    style: GoogleFonts.quicksand(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: textcolor.withValues(alpha: 0.6),
+                    ),
+                  ),
+                  Text(
+                    isCurrent
+                        ? audioPlayer.formatDuration(
+                            audioPlayer.totalDuration ?? Duration.zero)
+                        : "00:00",
+                    style: GoogleFonts.quicksand(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: textcolor.withValues(alpha: 0.6),
+                    ),
+                  ),
+                ],
+              ),
             ),
+
+            const SizedBox(height: 14),
+
+            // Controls row — rewind, big play/pause, forward
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.replay_10, color: Colors.white),
-                  iconSize: 60,
-                  onPressed: () => audioPlayer.rewind(const Duration(seconds: 10)),
+                _SkipButton(
+                  icon: Icons.replay_10_rounded,
+                  onTap: () =>
+                      audioPlayer.rewind(const Duration(seconds: 10)),
                 ),
-                const SizedBox(width: 10),
-                IconButton(
-                  icon: Icon(
-                    isCurrent && !audioPlayer.isPaused
-                        ? Icons.pause_circle_filled
-                        : Icons.play_circle_fill,
-                    color: Colors.white,
-                  ),
-                  iconSize: 60,
-                  onPressed: () => audioPlayer.play(filePath),
+                const SizedBox(width: 18),
+                _PlayPauseButton(
+                  isPlaying: isPlaying,
+                  onTap: () => audioPlayer.play(filePath),
                 ),
-                const SizedBox(width: 10),
-                IconButton(
-                  icon: const Icon(Icons.forward_10, color: Colors.white),
-                  iconSize: 60,
-                  onPressed: () => audioPlayer.forward(const Duration(seconds: 10)),
+                const SizedBox(width: 18),
+                _SkipButton(
+                  icon: Icons.forward_10_rounded,
+                  onTap: () =>
+                      audioPlayer.forward(const Duration(seconds: 10)),
                 ),
               ],
             ),
           ],
         );
       },
+    );
+  }
+}
+
+// =============================================================================
+// PRIVATE WIDGETS
+// =============================================================================
+
+class _PlayPauseButton extends StatelessWidget {
+  final bool isPlaying;
+  final VoidCallback onTap;
+  const _PlayPauseButton({required this.isPlaying, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: 64,
+        height: 64,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: secondColor,
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.7),
+            width: 2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: ducklingYellowDark.withValues(alpha: 0.5),
+              blurRadius: 18,
+              spreadRadius: isPlaying ? 3 : 1,
+            ),
+            BoxShadow(
+              color: textcolor.withValues(alpha: 0.10),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Icon(
+          isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+          size: 34,
+          color: textcolor,
+        ),
+      ),
+    );
+  }
+}
+
+class _SkipButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _SkipButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white.withValues(alpha: 0.5),
+          border: Border.all(
+            color: textcolor.withValues(alpha: 0.15),
+            width: 0.5,
+          ),
+        ),
+        child: Icon(
+          icon,
+          size: 22,
+          color: textcolor.withValues(alpha: 0.75),
+        ),
+      ),
     );
   }
 }

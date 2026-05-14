@@ -8,18 +8,28 @@ from sklearn.metrics import accuracy_score, classification_report
 from sklearn.preprocessing import StandardScaler
 import joblib
 
+# === NEW: shared cleaning module ===
+# clean_audio() does HPF + LPF + spectral gate + normalize + trim.
+# It replaces librosa.load() so training and inference see identical data.
+# CRITICAL: any future change to audio_clean.py requires retraining the model.
+from audio_clean import clean_audio
+
 # === SETTINGS ===
 dataset_path = r"C:\Users\User\OneDrive - Innobyte\Desktop\etech\lib\python\Day8"
 
 # === FUNCTION: Extract audio features ===
 def extract_features(file_path):
     try:
-        y, sr = librosa.load(file_path, sr=None)
+        # CHANGED: was `y, sr = librosa.load(file_path, sr=None)` followed by
+        # `y = librosa.util.normalize(y)`. Both of those are now inside
+        # clean_audio() — and clean_audio also does HPF/LPF/spectral gate/trim.
+        y, sr = clean_audio(file_path)
+
         if y.size == 0:
             return None
-        y = librosa.util.normalize(y)
 
-        # Core Features
+        # Core Features — UNCHANGED so the feature vector layout stays identical
+        # to the old model's scaler (13 MFCCs + 4 scalars = 17 dims).
         mfccs = np.mean(librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13).T, axis=0)
         spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
         spectral_rolloff = np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))
@@ -53,7 +63,7 @@ for label in labels_folders:
                 print(f"Skipping file: {file}")
 
 if len(data) == 0:
-    raise ValueError("❌ No valid audio files found in dataset.")
+    raise ValueError(" No valid audio files found in dataset.")
 
 # === STEP 2: Convert to DataFrame and normalize ===
 cols = [f"mfcc{i+1}" for i in range(13)] + ["spectral_centroid", "spectral_rolloff", "zero_crossing_rate", "pitch"]
@@ -61,7 +71,7 @@ df = pd.DataFrame(data, columns=cols)
 df["label"] = labels
 
 df.to_csv(os.path.join(dataset_path, "duckling_features_enhanced.csv"), index=False)
-print("✅ Feature extraction complete.")
+print(" Feature extraction complete.")
 
 X = df.drop("label", axis=1)
 y = df["label"]
@@ -77,9 +87,12 @@ model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
 print("\n📊 Classification Report:")
 print(classification_report(y_test, y_pred))
-print(f"✅ Accuracy: {round(accuracy_score(y_test, y_pred)*100,2)}%")
+print(f" Accuracy: {round(accuracy_score(y_test, y_pred)*100,2)}%")
 
 # === STEP 4: Save model & scaler ===
-joblib.dump(model, os.path.join(dataset_path, "duckling_svm_rbf_day8.pkl"))
-joblib.dump(scaler, os.path.join(dataset_path, "duckling_scaler_day8.pkl"))
+# NOTE: model filename bumped to mark that this generation was trained on
+# cleaned audio. Old .pkl files will NOT work with the new inference path —
+# they expect un-cleaned features.
+joblib.dump(model, os.path.join(dataset_path, "duckling_svm_rbf_cleaned.pkl"))
+joblib.dump(scaler, os.path.join(dataset_path, "duckling_scaler_cleaned.pkl"))
 print("💾 Model and scaler saved successfully.")

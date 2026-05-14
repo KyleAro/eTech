@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:etech/firebase_options.dart'; 
 import 'pages/MainPage.dart'; 
+import 'package:etech/style/mainpage_style.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 
 

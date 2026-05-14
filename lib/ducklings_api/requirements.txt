@@ -1,13 +1,13 @@
-fastapi
-uvicorn
-Flask
+# Existing
+flask
 librosa
-numpy
-joblib
 pydub
-soundfile
-werkzeug
+numpy
 pandas
-imageio-ffmpeg
-scikit-learn==1.7.2
-python-multipart
+scikit-learn
+joblib
+
+# New for audio_clean.py
+soundfile>=0.12
+scipy>=1.10
+noisereduce>=3.0
